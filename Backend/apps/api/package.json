@@ -1,0 +1,41 @@
+{
+  "name": "@mcq-platform/api",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "node --import tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "cors": "^2.8.5",
+    "helmet": "^8.0.0",
+    "cookie-parser": "^1.4.7",
+    "compression": "^1.7.5",
+    "express-rate-limit": "^7.4.0",
+    "zod": "^3.24.0",
+    "uuid": "^11.0.0",
+    "@mcq-platform/config": "*",
+    "@mcq-platform/logger": "*",
+    "@mcq-platform/shared-types": "*",
+    "@mcq-platform/auth": "*",
+    "@mcq-platform/db": "*",
+    "@mcq-platform/storage": "*",
+    "@mcq-platform/queue": "*"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/cors": "^2.8.17",
+    "@types/cookie-parser": "^1.4.7",
+    "@types/compression": "^1.7.5",
+    "@types/uuid": "^10.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  }
+}

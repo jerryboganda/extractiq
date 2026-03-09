@@ -1,0 +1,19 @@
+{
+  "name": "@mcq-platform/queue",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "bullmq": "^5.30.0",
+    "ioredis": "^5.4.0",
+    "@mcq-platform/config": "*",
+    "@mcq-platform/logger": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

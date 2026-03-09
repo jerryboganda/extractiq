@@ -1,0 +1,121 @@
+# ─── Production Docker Compose ───
+# Includes: PostgreSQL, Redis, MinIO, API, Worker, Nginx reverse proxy
+
+services:
+  # ── Infrastructure ──
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: extractiq-postgres
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mcq_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-mcq_platform}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./Backend/scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mcq_user} -d ${POSTGRES_DB:-mcq_platform}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: extractiq-redis
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    container_name: extractiq-minio
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY}
+    volumes:
+      - miniodata:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: extractiq-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    restart: "no"
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set extractiq http://minio:9000 ${S3_ACCESS_KEY} ${S3_SECRET_KEY};
+      mc mb extractiq/${S3_BUCKET:-mcq-platform} --ignore-existing;
+      exit 0;
+      "
+
+  # ── Application ──
+  api:
+    build:
+      context: ./Backend
+      dockerfile: Dockerfile
+      target: api
+    container_name: extractiq-api
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:4000:4000"
+    env_file: ./Backend/.env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-mcq_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-mcq_platform}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      S3_ENDPOINT: http://minio:9000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ./Backend
+      dockerfile: Dockerfile
+      target: worker
+    container_name: extractiq-worker
+    restart: unless-stopped
+    env_file: ./Backend/.env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-mcq_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-mcq_platform}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      S3_ENDPOINT: http://minio:9000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:

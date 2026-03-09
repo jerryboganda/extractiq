@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "noUncheckedIndexedAccess": false,
+    "exactOptionalPropertyTypes": false
+  },
+  "references": [
+    { "path": "packages/config" },
+    { "path": "packages/logger" },
+    { "path": "packages/shared-types" },
+    { "path": "packages/auth" },
+    { "path": "packages/db" },
+    { "path": "packages/storage" },
+    { "path": "packages/queue" },
+    { "path": "apps/api" },
+    { "path": "apps/worker" }
+  ],
+  "files": [],
+  "exclude": ["node_modules", "dist"]
+}

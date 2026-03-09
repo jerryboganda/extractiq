@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://extractiq.com/</loc><priority>1.0</priority></url>
+  <url><loc>https://extractiq.com/product</loc><priority>0.9</priority></url>
+  <url><loc>https://extractiq.com/how-it-works</loc><priority>0.8</priority></url>
+  <url><loc>https://extractiq.com/pricing</loc><priority>0.9</priority></url>
+  <url><loc>https://extractiq.com/demo</loc><priority>0.9</priority></url>
+  <url><loc>https://extractiq.com/enterprise</loc><priority>0.8</priority></url>
+  <url><loc>https://extractiq.com/security</loc><priority>0.7</priority></url>
+  <url><loc>https://extractiq.com/solutions/pdf-to-question-bank</loc><priority>0.7</priority></url>
+  <url><loc>https://extractiq.com/solutions/lms-export</loc><priority>0.7</priority></url>
+  <url><loc>https://extractiq.com/solutions/document-operations</loc><priority>0.7</priority></url>
+  <url><loc>https://extractiq.com/integrations</loc><priority>0.7</priority></url>
+  <url><loc>https://extractiq.com/compare</loc><priority>0.6</priority></url>
+  <url><loc>https://extractiq.com/about</loc><priority>0.6</priority></url>
+  <url><loc>https://extractiq.com/blog</loc><priority>0.8</priority></url>
+</urlset>

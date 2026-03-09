@@ -1,0 +1,12 @@
+{
+  "name": "@mcq-platform/logger",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "dependencies": {
+    "pino": "^9.6.0",
+    "@mcq-platform/config": "*"
+  }
+}

@@ -1,0 +1,136 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 225 47% 7%;
+    --foreground: 210 40% 98%;
+
+    --card: 222 39% 11%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 222 39% 11%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 217 91% 60%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 258 90% 66%;
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 222 39% 15%;
+    --muted-foreground: 215 20% 65%;
+
+    --accent: 189 94% 43%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 215 20% 18%;
+    --input: 215 20% 18%;
+    --ring: 217 91% 60%;
+
+    --radius: 0.75rem;
+
+    --success: 160 84% 39%;
+
+    --sidebar-background: 222 39% 9%;
+    --sidebar-foreground: 210 40% 98%;
+    --sidebar-primary: 217 91% 60%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 222 39% 15%;
+    --sidebar-accent-foreground: 210 40% 98%;
+    --sidebar-border: 215 20% 18%;
+    --sidebar-ring: 217 91% 60%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+/* Scroll Reveal Animations */
+.scroll-reveal {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1), transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.scroll-reveal.revealed {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Hero Animated Grid Background */
+.hero-grid-bg {
+  background-image:
+    linear-gradient(rgba(59, 130, 246, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(59, 130, 246, 0.04) 1px, transparent 1px);
+  background-size: 64px 64px;
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 40%, black 20%, transparent 100%);
+}
+
+/* Glow Effects */
+.glow-primary {
+  box-shadow: 0 0 30px hsl(217 91% 60% / 0.3);
+}
+
+.glow-primary-hover:hover {
+  box-shadow: 0 0 40px hsl(217 91% 60% / 0.5);
+}
+
+/* Glass Card */
+.glass-card {
+  background: hsl(222 39% 11% / 0.6);
+  backdrop-filter: blur(12px);
+  border: 1px solid hsl(215 20% 18% / 0.5);
+}
+
+/* Skip to content */
+.skip-to-content {
+  @apply sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[100] focus:px-4 focus:py-2 focus:bg-primary focus:text-primary-foreground focus:rounded-md focus:text-sm focus:font-medium;
+}
+
+/* Focus visible */
+*:focus-visible {
+  @apply outline-2 outline-offset-2 outline-ring;
+}
+
+/* Page transition */
+.page-fade-in {
+  animation: pageFadeIn 0.25s ease-out;
+}
+
+@keyframes pageFadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Marquee animation */
+@keyframes marquee {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-33.333%); }
+}
+
+.animate-marquee {
+  animation: marquee 30s linear infinite;
+}
+
+.animate-marquee:hover {
+  animation-play-state: paused;
+}
