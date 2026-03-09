@@ -3,16 +3,16 @@ FROM node:20-alpine AS builder
 
 # Build Website
 WORKDIR /build/website
-COPY Website/package.json Website/package-lock.json ./
+COPY ["Website/package.json", "Website/package-lock.json", "./"]
 RUN npm ci
-COPY Website/ .
+COPY ["Website/", "."]
 RUN npm run build
 
 # Build Web App
 WORKDIR /build/webapp
-COPY Web\ App/package.json Web\ App/package-lock.json ./
+COPY ["Web App/package.json", "Web App/package-lock.json", "./"]
 RUN npm ci
-COPY Web\ App/ .
+COPY ["Web App/", "."]
 ENV VITE_API_URL=/api/v1
 RUN npm run build
 
