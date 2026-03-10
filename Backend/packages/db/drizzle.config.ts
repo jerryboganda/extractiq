@@ -2,8 +2,8 @@ import { env } from '@mcq-platform/config';
 import { defineConfig } from 'drizzle-kit';
 
 export default defineConfig({
-  schema: './src/schema/index.ts',
-  out: './drizzle',
+  schema: './packages/db/src/schema/index.ts',
+  out: './packages/db/drizzle',
   dialect: 'postgresql',
   dbCredentials: {
     url: env.DATABASE_URL,
