@@ -106,6 +106,7 @@ services:
         condition: service_healthy
     networks:
       - extractiq
+      - npm_network
 
   worker:
     build:
@@ -140,6 +141,7 @@ services:
         condition: service_healthy
     networks:
       - extractiq
+      - npm_network
 
   # ── Frontend (Website + Web App) ──
   frontend:
@@ -152,6 +154,7 @@ services:
       - "127.0.0.1:4101:80"
     networks:
       - extractiq
+      - npm_network
 
 volumes:
   pgdata:
@@ -162,3 +165,6 @@ networks:
   extractiq:
     name: extractiq
     driver: bridge
+  npm_network:
+    external: true
+    name: nginx-proxy-manager_default
