@@ -2,7 +2,7 @@ import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { FileUp, CheckCircle2, Cog, Flag, Download, Settings } from "lucide-react";
-import { mockRecentActivity } from "@/lib/mock-data";
+import { useRecentActivity } from "@/hooks/use-api";
 import { StaggerContainer, StaggerItem } from "@/components/StaggerContainer";
 import { type LucideIcon } from "lucide-react";
 
@@ -17,6 +17,8 @@ const typeStyles: Record<string, { icon: LucideIcon; bg: string; color: string }
 
 export function ActivityTimeline() {
   const navigate = useNavigate();
+  const { data: recentActivity } = useRecentActivity();
+  const activity = recentActivity ?? [];
 
   return (
     <Card className="glass border-border">
@@ -33,7 +35,7 @@ export function ActivityTimeline() {
       </CardHeader>
       <CardContent>
         <StaggerContainer className="relative space-y-0">
-          {mockRecentActivity.slice(0, 5).map((a, i) => {
+          {activity.slice(0, 5).map((a: any, i: number) => {
             const style = typeStyles[a.type] || typeStyles.settings;
             const IconComponent = style.icon;
             return (

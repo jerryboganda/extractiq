@@ -36,6 +36,8 @@ export const documents = pgTable('documents', {
   index('documents_project_id_idx').on(t.projectId),
   index('documents_status_idx').on(t.status),
   index('documents_uploaded_by_idx').on(t.uploadedBy),
+  // Composite: project listing with status filter
+  index('documents_project_status_idx').on(t.projectId, t.status),
 ]);
 
 // ──────────────────────────────────────────────

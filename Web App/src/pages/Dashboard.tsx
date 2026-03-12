@@ -3,7 +3,6 @@ import { Button } from "@/components/ui/button";
 import {
   FileText, BookOpen, CheckCircle2, Activity, Upload, FolderKanban, ListChecks,
 } from "lucide-react";
-import { mockStats, mockSparklineData } from "@/lib/mock-data";
 import { StatCard } from "@/components/dashboard/StatCard";
 import { StatCardSkeleton } from "@/components/ui/skeleton-cards";
 import { ActiveJobsPanel } from "@/components/dashboard/ActiveJobsPanel";
@@ -11,15 +10,8 @@ import { ActivityTimeline } from "@/components/dashboard/ActivityTimeline";
 import { ProviderHealthStrip } from "@/components/dashboard/ProviderHealthStrip";
 import { WelcomeBanner } from "@/components/dashboard/WelcomeBanner";
 import { SystemIntelligenceBar } from "@/components/dashboard/SystemIntelligenceBar";
-import { useSimulatedLoading } from "@/hooks/use-simulated-loading";
+import { useDashboardStats, useDashboardSparklines } from "@/hooks/use-api";
 import { StaggerContainer, StaggerItem } from "@/components/StaggerContainer";
-
-const statCards = [
-  { title: "Documents Processed", value: mockStats.documentsProcessed, trend: mockStats.documentsProcessedTrend, icon: FileText, color: "electric", sparkline: mockSparklineData.documentsProcessed },
-  { title: "MCQs Extracted", value: mockStats.mcqsExtracted, trend: mockStats.mcqsExtractedTrend, icon: BookOpen, color: "violet", sparkline: mockSparklineData.mcqsExtracted },
-  { title: "Approval Rate", value: mockStats.approvalRate, suffix: "%", trend: mockStats.approvalRateTrend, icon: CheckCircle2, color: "success", sparkline: mockSparklineData.approvalRate, decimals: 1 },
-  { title: "Active Jobs", value: mockStats.activeJobs, trend: mockStats.activeJobsTrend, icon: Activity, color: "warning", sparkline: mockSparklineData.activeJobs },
-];
 
 const quickActions = [
   { label: "Upload Documents", icon: Upload, href: "/upload" },
@@ -29,7 +21,15 @@ const quickActions = [
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const isLoading = useSimulatedLoading(800);
+  const { data: stats, isLoading: statsLoading } = useDashboardStats();
+  const { data: sparklines } = useDashboardSparklines();
+
+  const statCards = stats ? [
+    { title: "Documents Processed", value: stats.documentsProcessed ?? 0, trend: stats.documentsProcessedTrend ?? 0, icon: FileText, color: "electric", sparkline: sparklines?.documentsProcessed },
+    { title: "MCQs Extracted", value: stats.mcqsExtracted ?? 0, trend: stats.mcqsExtractedTrend ?? 0, icon: BookOpen, color: "violet", sparkline: sparklines?.mcqsExtracted },
+    { title: "Approval Rate", value: stats.approvalRate ?? 0, suffix: "%", trend: stats.approvalRateTrend ?? 0, icon: CheckCircle2, color: "success", sparkline: sparklines?.approvalRate, decimals: 1 },
+    { title: "Active Jobs", value: stats.activeJobs ?? 0, trend: stats.activeJobsTrend ?? 0, icon: Activity, color: "warning", sparkline: sparklines?.activeJobs },
+  ] : [];
 
   return (
     <div className="space-y-6">
@@ -51,7 +51,7 @@ export default function Dashboard() {
       </div>
 
       <StaggerContainer className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {isLoading
+        {statsLoading
           ? Array.from({ length: 4 }).map((_, i) => <StaggerItem key={i}><StatCardSkeleton /></StaggerItem>)
           : statCards.map((stat) => (
               <StaggerItem key={stat.title}>

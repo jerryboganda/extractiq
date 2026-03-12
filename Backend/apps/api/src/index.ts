@@ -12,6 +12,7 @@ import { errorHandler } from './middleware/error-handler.js';
 import { requestLogger } from './middleware/request-logger.js';
 import { correlationId } from './middleware/correlation-id.js';
 import { rateLimiter } from './middleware/rate-limiter.js';
+import { metricsMiddleware } from './middleware/metrics.js';
 
 // Route modules
 import { authRouter } from './routes/auth/router.js';
@@ -40,6 +41,12 @@ const app = express();
 // ──────────────────────────────────────────────
 app.use(helmet());
 app.use(compression());
+
+// Trust first proxy (Nginx) — required for correct client IP in rate limiting & logging
+if (env.NODE_ENV === 'production') {
+  app.set('trust proxy', 1);
+}
+
 app.use(cors({
   origin: env.CORS_ORIGIN,
   credentials: true,
@@ -48,6 +55,7 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 app.use(correlationId);
+app.use(metricsMiddleware);
 app.use(requestLogger);
 app.use(rateLimiter);
 

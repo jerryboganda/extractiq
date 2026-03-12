@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Search, CheckCircle, XCircle, Flag, SkipForward, ListChecks, X } from "lucide-react";
-import { mockReviewQueue } from "@/lib/mock-data";
+import { useReviewQueue, useBulkReview } from "@/hooks/use-api";
 import { EmptyState } from "@/components/EmptyState";
 import { toast } from "sonner";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -27,13 +27,17 @@ export default function ReviewQueue() {
   const [search, setSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
+  const { data: reviewData } = useReviewQueue({ status: tab !== 'all' ? tab : undefined });
+  const bulkReview = useBulkReview();
+  const reviewQueue = reviewData?.items ?? (Array.isArray(reviewData) ? reviewData : []);
+
   const filtered = useMemo(() => {
-    return mockReviewQueue.filter((item) => {
+    return reviewQueue.filter((item: any) => {
       if (tab !== "all" && item.status !== tab) return false;
-      if (search && !item.question.toLowerCase().includes(search.toLowerCase())) return false;
+      if (search && !(item.question || '').toLowerCase().includes(search.toLowerCase())) return false;
       return true;
     });
-  }, [tab, search]);
+  }, [tab, search, reviewQueue]);
 
   const allSelected = filtered.length > 0 && filtered.every((i) => selectedIds.has(i.id));
   const toggleAll = useCallback(() => {
@@ -62,7 +66,7 @@ export default function ReviewQueue() {
           <TabsList className="h-9 flex-wrap">
             {tabValues.map((t) => (
               <TabsTrigger key={t} value={t} className="text-xs capitalize">
-                {t === "all" ? `All (${mockReviewQueue.length})` : t}
+                {t === "all" ? `All (${reviewQueue.length})` : t}
               </TabsTrigger>
             ))}
           </TabsList>
@@ -83,13 +87,13 @@ export default function ReviewQueue() {
           >
             <span className="text-sm font-medium">{selectedIds.size} selected</span>
             <div className="flex gap-2 ml-auto flex-wrap">
-              <Button variant="outline" size="sm" className="gap-1.5 h-8 text-success hover:text-success" onClick={() => { toast.success(`Approved ${selectedIds.size} MCQs`); setSelectedIds(new Set()); }}>
+              <Button variant="outline" size="sm" className="gap-1.5 h-8 text-success hover:text-success" onClick={() => { bulkReview.mutate({ ids: [...selectedIds], action: 'approve' }); setSelectedIds(new Set()); }}>
                 <CheckCircle className="h-3.5 w-3.5" /> <span className="hidden sm:inline">Approve</span>
               </Button>
-              <Button variant="outline" size="sm" className="gap-1.5 h-8 text-destructive hover:text-destructive" onClick={() => { toast.error(`Rejected ${selectedIds.size} MCQs`); setSelectedIds(new Set()); }}>
+              <Button variant="outline" size="sm" className="gap-1.5 h-8 text-destructive hover:text-destructive" onClick={() => { bulkReview.mutate({ ids: [...selectedIds], action: 'reject' }); setSelectedIds(new Set()); }}>
                 <XCircle className="h-3.5 w-3.5" /> <span className="hidden sm:inline">Reject</span>
               </Button>
-              <Button variant="outline" size="sm" className="gap-1.5 h-8 text-warning hover:text-warning" onClick={() => { toast(`Flagged ${selectedIds.size} MCQs`); setSelectedIds(new Set()); }}>
+              <Button variant="outline" size="sm" className="gap-1.5 h-8 text-warning hover:text-warning" onClick={() => { bulkReview.mutate({ ids: [...selectedIds], action: 'flag' }); setSelectedIds(new Set()); }}>
                 <Flag className="h-3.5 w-3.5" /> <span className="hidden sm:inline">Flag</span>
               </Button>
               <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setSelectedIds(new Set())}>

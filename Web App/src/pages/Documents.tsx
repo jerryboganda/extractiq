@@ -9,7 +9,7 @@ import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription,
 } from "@/components/ui/sheet";
 import { Search, Download, FileText, RotateCcw, BookOpen, Trash2, X } from "lucide-react";
-import { mockDocuments } from "@/lib/mock-data";
+import { useDocuments } from "@/hooks/use-api";
 import { EmptyState } from "@/components/EmptyState";
 import { toast } from "sonner";
 import { SortableHeader, SortConfig, toggleSort, useSort } from "@/components/SortableHeader";
@@ -26,11 +26,11 @@ const statusStyles: Record<string, string> = {
 
 const tabValues = ["all", "queued", "processing", "completed", "review", "failed"] as const;
 
-function countByStatus(status: string) {
-  return mockDocuments.filter((d) => d.status === status).length;
+function countByStatus(docs: any[], status: string) {
+  return docs.filter((d: any) => d.status === status).length;
 }
 
-const sortGetters: Record<string, (d: typeof mockDocuments[0]) => string | number> = {
+const sortGetters: Record<string, (d: any) => string | number> = {
   filename: (d) => d.filename,
   status: (d) => d.status,
   pages: (d) => d.pages,
@@ -44,18 +44,21 @@ export default function Documents() {
   const PAGE_SIZE = 10;
   const [tab, setTab] = useState("all");
   const [search, setSearch] = useState("");
-  const [selectedDoc, setSelectedDoc] = useState<typeof mockDocuments[0] | null>(null);
+  const [selectedDoc, setSelectedDoc] = useState<any | null>(null);
   const [sort, setSort] = useState<SortConfig | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(1);
 
+  const { data: docsData } = useDocuments({ status: tab !== 'all' ? tab : undefined });
+  const allDocuments = docsData?.items ?? [];
+
   const filtered = useMemo(() => {
-    return mockDocuments.filter((doc) => {
+    return allDocuments.filter((doc: any) => {
       if (tab !== "all" && doc.status !== tab) return false;
-      if (search && !doc.filename.toLowerCase().includes(search.toLowerCase())) return false;
+      if (search && !(doc.filename || doc.name || '').toLowerCase().includes(search.toLowerCase())) return false;
       return true;
     });
-  }, [tab, search]);
+  }, [tab, search, allDocuments]);
 
   const sorted = useSort(filtered, sort, sortGetters);
   const totalPages = Math.ceil(sorted.length / PAGE_SIZE);
@@ -85,7 +88,7 @@ export default function Documents() {
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Documents</h1>
-          <p className="text-sm text-muted-foreground mt-1">{mockDocuments.length} documents across all projects</p>
+          <p className="text-sm text-muted-foreground mt-1">{allDocuments.length} documents across all projects</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" className="gap-2"><Download className="h-3.5 w-3.5" /> <span className="hidden sm:inline">Export</span></Button>
@@ -98,7 +101,7 @@ export default function Documents() {
           <TabsList className="h-9 flex-wrap">
             {tabValues.map((t) => (
               <TabsTrigger key={t} value={t} className="text-xs capitalize">
-                {t === "all" ? `All (${mockDocuments.length})` : `${t} (${countByStatus(t)})`}
+                {t === "all" ? `All (${allDocuments.length})` : `${t} (${countByStatus(allDocuments, t)})`}
               </TabsTrigger>
             ))}
           </TabsList>

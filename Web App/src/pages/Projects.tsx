@@ -7,9 +7,18 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { FolderKanban, Plus, Search, MoreVertical, Users } from "lucide-react";
-import { mockProjects } from "@/lib/mock-data";
+import { useProjects, useCreateProject } from "@/hooks/use-api";
 import { toast } from "sonner";
 import { StaggerContainer, StaggerItem } from "@/components/StaggerContainer";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
+
+const createProjectSchema = z.object({
+  name: z.string().min(1, "Project name is required").max(100, "Name must be 100 characters or less"),
+  description: z.string().max(500, "Description must be 500 characters or less").optional().or(z.literal("")),
+});
+type CreateProjectValues = z.infer<typeof createProjectSchema>;
 
 const statusColors: Record<string, string> = {
   active: "bg-success/10 text-success border-success/20",
@@ -20,20 +29,27 @@ const statusColors: Record<string, string> = {
 export default function Projects() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [newName, setNewName] = useState("");
-  const [newDesc, setNewDesc] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
 
-  const filtered = mockProjects.filter((p) => {
-    const matchesSearch = !search || p.name.toLowerCase().includes(search.toLowerCase()) || p.description.toLowerCase().includes(search.toLowerCase());
+  const { register, handleSubmit, reset, formState: { errors } } = useForm<CreateProjectValues>({
+    resolver: zodResolver(createProjectSchema),
+    defaultValues: { name: "", description: "" },
+  });
+
+  const { data: projectsData } = useProjects({ search: search || undefined });
+  const createProject = useCreateProject();
+  const projects = projectsData?.items ?? [];
+
+  const filtered = projects.filter((p: any) => {
+    const matchesSearch = !search || p.name.toLowerCase().includes(search.toLowerCase()) || (p.description || '').toLowerCase().includes(search.toLowerCase());
     const matchesStatus = statusFilter === "all" || p.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
 
-  const handleCreate = () => {
-    if (!newName.trim()) { toast.error("Project name is required"); return; }
-    toast.success(`Project "${newName}" created`);
-    setNewName(""); setNewDesc(""); setDialogOpen(false);
+  const onCreateSubmit = (data: CreateProjectValues) => {
+    createProject.mutate({ name: data.name, description: data.description || undefined });
+    reset();
+    setDialogOpen(false);
   };
 
   return (
@@ -49,20 +65,22 @@ export default function Projects() {
           </DialogTrigger>
           <DialogContent className="glass">
             <DialogHeader><DialogTitle>Create New Project</DialogTitle></DialogHeader>
-            <div className="space-y-4 py-2">
+            <form onSubmit={handleSubmit(onCreateSubmit)} className="space-y-4 py-2">
               <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Project Name</label>
-                <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="e.g. Medical Board Prep" className="h-9 text-sm" />
+                <label htmlFor="project-name" className="text-xs font-medium text-muted-foreground mb-1.5 block">Project Name</label>
+                <Input id="project-name" {...register("name")} placeholder="e.g. Medical Board Prep" className="h-9 text-sm" aria-invalid={!!errors.name} aria-describedby={errors.name ? "project-name-error" : undefined} />
+                {errors.name && <p id="project-name-error" className="text-xs text-destructive mt-1">{errors.name.message}</p>}
               </div>
               <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Description</label>
-                <textarea value={newDesc} onChange={(e) => setNewDesc(e.target.value)} placeholder="Brief description..." className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm min-h-[80px]" />
+                <label htmlFor="project-desc" className="text-xs font-medium text-muted-foreground mb-1.5 block">Description</label>
+                <textarea id="project-desc" {...register("description")} placeholder="Brief description..." className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm min-h-[80px]" aria-invalid={!!errors.description} aria-describedby={errors.description ? "project-desc-error" : undefined} />
+                {errors.description && <p id="project-desc-error" className="text-xs text-destructive mt-1">{errors.description.message}</p>}
               </div>
-            </div>
-            <DialogFooter>
-              <DialogClose asChild><Button variant="outline" size="sm">Cancel</Button></DialogClose>
-              <Button size="sm" onClick={handleCreate}>Create Project</Button>
-            </DialogFooter>
+              <DialogFooter>
+                <DialogClose asChild><Button variant="outline" size="sm" type="button">Cancel</Button></DialogClose>
+                <Button size="sm" type="submit">Create Project</Button>
+              </DialogFooter>
+            </form>
           </DialogContent>
         </Dialog>
       </div>

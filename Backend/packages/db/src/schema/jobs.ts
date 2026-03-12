@@ -35,6 +35,8 @@ export const jobs = pgTable('jobs', {
   index('jobs_workspace_id_idx').on(t.workspaceId),
   index('jobs_project_id_idx').on(t.projectId),
   index('jobs_status_idx').on(t.status),
+  // Composite: workspace listing with status filter
+  index('jobs_ws_status_idx').on(t.workspaceId, t.status),
 ]);
 
 // ──────────────────────────────────────────────
@@ -73,4 +75,6 @@ export const jobTasks = pgTable('job_tasks', {
   index('job_tasks_status_idx').on(t.status),
   index('job_tasks_task_type_idx').on(t.taskType),
   index('job_tasks_document_id_idx').on(t.documentId),
+  // Composite: tracking job progress by task status
+  index('job_tasks_job_status_idx').on(t.jobId, t.status),
 ]);

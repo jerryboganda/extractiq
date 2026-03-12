@@ -6,7 +6,7 @@ import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/componen
 import { PdfViewerPanel } from "@/components/review/PdfViewerPanel";
 import { McqEditorPanel } from "@/components/review/McqEditorPanel";
 import { ReviewActionBar } from "@/components/review/ReviewActionBar";
-import { mockReviewDetails, mockReviewIds } from "@/lib/mock-data";
+import { useReviewDetail, useReviewNavigation } from "@/hooks/use-api";
 import { ArrowLeft, ChevronLeft, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -22,18 +22,21 @@ export default function ReviewDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
-  const detail = id ? mockReviewDetails[id] : undefined;
 
-  const currentIndex = id ? mockReviewIds.indexOf(id) : -1;
+  const { data: detail } = useReviewDetail(id || '');
+  const { data: navigation } = useReviewNavigation(id || '');
+
+  const reviewIds = navigation?.ids ?? [];
+  const currentIndex = id ? reviewIds.indexOf(id) : -1;
   const hasPrev = currentIndex > 0;
-  const hasNext = currentIndex < mockReviewIds.length - 1;
+  const hasNext = currentIndex < reviewIds.length - 1;
 
   const goTo = useCallback((direction: "prev" | "next") => {
     const nextIndex = direction === "prev" ? currentIndex - 1 : currentIndex + 1;
-    if (nextIndex >= 0 && nextIndex < mockReviewIds.length) {
-      navigate(`/review/${mockReviewIds[nextIndex]}`);
+    if (nextIndex >= 0 && nextIndex < reviewIds.length) {
+      navigate(`/review/${reviewIds[nextIndex]}`);
     }
-  }, [currentIndex, navigate]);
+  }, [currentIndex, navigate, reviewIds]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -73,7 +76,7 @@ export default function ReviewDetail() {
             </Badge>
           </div>
           <p className="text-xs text-muted-foreground truncate mt-0.5">
-            Question {currentIndex + 1} of {mockReviewIds.length}
+            Question {currentIndex + 1} of {reviewIds.length}
           </p>
         </div>
         <div className="flex items-center gap-1">

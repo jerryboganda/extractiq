@@ -292,6 +292,35 @@ export function createWorker<T>(
 }
 
 /**
+ * Ping Redis to verify connectivity (used by health checks).
+ */
+export async function pingRedis(): Promise<void> {
+  const conn = createRedisConnection();
+  try {
+    await conn.ping();
+  } finally {
+    conn.disconnect();
+  }
+}
+
+/**
+ * Get job counts for all initialized queues (used by health checks).
+ */
+export async function getQueueDepths(): Promise<Record<string, { waiting: number; active: number; delayed: number; failed: number }>> {
+  const result: Record<string, { waiting: number; active: number; delayed: number; failed: number }> = {};
+  for (const [name, queue] of queues.entries()) {
+    const counts = await queue.getJobCounts('waiting', 'active', 'delayed', 'failed');
+    result[name] = {
+      waiting: counts.waiting ?? 0,
+      active: counts.active ?? 0,
+      delayed: counts.delayed ?? 0,
+      failed: counts.failed ?? 0,
+    };
+  }
+  return result;
+}
+
+/**
  * Gracefully close all queues.
  */
 export async function closeAllQueues(): Promise<void> {

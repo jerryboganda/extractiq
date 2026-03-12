@@ -329,10 +329,34 @@ export const updateUserSchema = z.object({
   name: z.string().min(1).max(100).optional(),
 });
 
+/** Allowed MIME types for document upload */
+const ALLOWED_MIME_TYPES = [
+  'application/pdf',
+  'image/png',
+  'image/jpeg',
+  'image/tiff',
+  'image/webp',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
+] as const;
+
+/** Max file size: 50 MB */
+const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024;
+
+/** Sanitize filename: strip path traversal, null bytes, and control characters */
+function sanitizeFilename(name: string): string {
+  return name
+    .replace(/[\x00-\x1f]/g, '')         // strip control characters
+    .replace(/\.\./g, '')                 // strip path traversal
+    .replace(/[\/\\]/g, '')              // strip path separators
+    .trim();
+}
+
 export const presignUploadSchema = z.object({
-  filename: z.string().min(1),
-  contentType: z.string().min(1),
-  fileSize: z.number().positive(),
+  filename: z.string().min(1).max(255).transform(sanitizeFilename).pipe(z.string().min(1, 'Invalid filename')),
+  contentType: z.enum(ALLOWED_MIME_TYPES, {
+    errorMap: () => ({ message: `File type not supported. Allowed: ${ALLOWED_MIME_TYPES.join(', ')}` }),
+  }),
+  fileSize: z.number().positive().max(MAX_FILE_SIZE_BYTES, `File size must not exceed ${MAX_FILE_SIZE_BYTES / 1024 / 1024} MB`),
   projectId: z.string().uuid(),
 });
 

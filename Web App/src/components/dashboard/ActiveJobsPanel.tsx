@@ -3,7 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ArrowRight } from "lucide-react";
 import { ProgressRing } from "./ProgressRing";
-import { mockActiveJobs } from "@/lib/mock-data";
+import { useActiveJobs } from "@/hooks/use-api";
 import { cn } from "@/lib/utils";
 import { StaggerContainer, StaggerItem } from "@/components/StaggerContainer";
 
@@ -40,6 +40,9 @@ function getStageIndex(stage: string): number {
 }
 
 export function ActiveJobsPanel() {
+  const { data: activeJobs } = useActiveJobs();
+  const jobs = activeJobs ?? [];
+
   return (
     <Card className="lg:col-span-2 glass border-border">
       <CardHeader className="pb-3">
@@ -52,7 +55,7 @@ export function ActiveJobsPanel() {
       </CardHeader>
       <CardContent>
         <StaggerContainer className="space-y-3">
-          {mockActiveJobs.map((job) => (
+          {jobs.map((job: any) => (
             <StaggerItem key={job.id}>
               <div className="flex items-center gap-3 sm:gap-4 p-3 rounded-lg bg-muted/50 hover:bg-muted transition-colors">
                 <ProgressRing

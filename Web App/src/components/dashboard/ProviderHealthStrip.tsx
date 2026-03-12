@@ -1,7 +1,7 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { mockProviderHealth } from "@/lib/mock-data";
+import { useProviderHealth } from "@/hooks/use-api";
 import { StaggerContainer, StaggerItem } from "@/components/StaggerContainer";
 
 const statusColors: Record<string, string> = {
@@ -11,12 +11,15 @@ const statusColors: Record<string, string> = {
 };
 
 export function ProviderHealthStrip() {
+  const { data: providerHealth } = useProviderHealth();
+  const providers = providerHealth ?? [];
+
   return (
     <div>
       <h3 className="text-sm font-semibold mb-3 text-muted-foreground uppercase tracking-wider">Provider Health</h3>
       <StaggerContainer className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <TooltipProvider delayDuration={200}>
-          {mockProviderHealth.map((p) => (
+          {providers.map((p: any) => (
             <StaggerItem key={p.name}>
               <Tooltip>
                 <TooltipTrigger asChild>

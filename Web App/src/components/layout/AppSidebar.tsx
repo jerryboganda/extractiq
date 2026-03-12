@@ -20,7 +20,8 @@ import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
 import { motion } from "framer-motion";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { mockUser, mockWorkspace } from "@/lib/mock-data";
+import { useAuth } from "@/contexts/AuthContext";
+import { useWorkspace } from "@/hooks/use-api";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -90,6 +91,12 @@ export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
   const location = useLocation();
+  const { user, logout } = useAuth();
+  const { data: workspace } = useWorkspace();
+
+  const initials = user?.name
+    ? user.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()
+    : '?';
 
   const isActive = (path: string) =>
     path === "/" ? location.pathname === "/" : location.pathname.startsWith(path);
@@ -103,9 +110,9 @@ export function AppSidebar() {
           </div>
           {!collapsed && (
             <div className="flex flex-col min-w-0">
-              <span className="text-sm font-semibold truncate">{mockWorkspace.name}</span>
+              <span className="text-sm font-semibold truncate">{workspace?.name || 'Workspace'}</span>
               <Badge variant="secondary" className="w-fit text-[10px] px-1.5 py-0 h-4 mt-0.5">
-                {mockWorkspace.plan}
+                {workspace?.plan || 'Free'}
               </Badge>
             </div>
           )}
@@ -163,12 +170,12 @@ export function AppSidebar() {
                 <button className="flex items-center gap-2 rounded-lg p-1.5 hover:bg-sidebar-accent transition-colors w-full text-left">
                   <Avatar className="h-7 w-7">
                     <AvatarFallback className="text-[11px] bg-primary text-primary-foreground font-semibold">
-                      {mockUser.initials}
+                      {initials}
                     </AvatarFallback>
                   </Avatar>
                   <div className="flex flex-col min-w-0 flex-1">
-                    <span className="text-xs font-medium truncate">{mockUser.name}</span>
-                    <span className="text-[10px] text-muted-foreground truncate">{mockUser.email}</span>
+                    <span className="text-xs font-medium truncate">{user?.name || 'User'}</span>
+                    <span className="text-[10px] text-muted-foreground truncate">{user?.email || ''}</span>
                   </div>
                   <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" />
                 </button>
@@ -177,7 +184,7 @@ export function AppSidebar() {
                 <DropdownMenuItem>Profile</DropdownMenuItem>
                 <DropdownMenuItem>Preferences</DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem>Sign out</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => logout()}>Sign out</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           )}

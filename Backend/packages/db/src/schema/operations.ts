@@ -107,6 +107,8 @@ export const auditLogs = pgTable('audit_logs', {
   index('audit_logs_user_id_idx').on(t.userId),
   index('audit_logs_action_idx').on(t.action),
   index('audit_logs_created_at_idx').on(t.createdAt),
+  // Composite: paginated audit log queries
+  index('audit_logs_ws_created_at_idx').on(t.workspaceId, t.createdAt),
 ]);
 
 // ──────────────────────────────────────────────
@@ -126,6 +128,8 @@ export const notifications = pgTable('notifications', {
   index('notifications_user_id_idx').on(t.userId),
   index('notifications_workspace_id_idx').on(t.workspaceId),
   index('notifications_read_idx').on(t.read),
+  // Composite: unread notifications per user
+  index('notifications_user_read_idx').on(t.userId, t.read),
 ]);
 
 // ──────────────────────────────────────────────

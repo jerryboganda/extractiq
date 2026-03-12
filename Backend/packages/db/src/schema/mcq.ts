@@ -57,6 +57,9 @@ export const mcqRecords = pgTable('mcq_records', {
   index('mcq_records_review_status_idx').on(t.reviewStatus),
   index('mcq_records_confidence_idx').on(t.confidence),
   index('mcq_records_hallucination_tier_idx').on(t.hallucinationRiskTier),
+  // Composite indexes for common query patterns
+  index('mcq_records_ws_project_status_idx').on(t.workspaceId, t.projectId, t.reviewStatus),
+  index('mcq_records_ws_confidence_idx').on(t.workspaceId, t.confidence),
 ]);
 
 // ──────────────────────────────────────────────
@@ -93,6 +96,9 @@ export const reviewItems = pgTable('review_items', {
   index('review_items_workspace_id_idx').on(t.workspaceId),
   index('review_items_status_idx').on(t.status),
   index('review_items_assigned_to_idx').on(t.assignedTo),
+  // Composite: queue listing by workspace + status
+  index('review_items_ws_status_idx').on(t.workspaceId, t.status),
+  index('review_items_ws_assigned_status_idx').on(t.workspaceId, t.assignedTo, t.status),
 ]);
 
 // ──────────────────────────────────────────────

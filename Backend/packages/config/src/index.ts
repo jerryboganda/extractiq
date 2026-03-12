@@ -29,8 +29,8 @@ const envSchema = z.object({
 
   // MinIO / S3
   S3_ENDPOINT: z.string().default('http://localhost:9000'),
-  S3_ACCESS_KEY: z.string().default('minioadmin'),
-  S3_SECRET_KEY: z.string().default('minioadmin'),
+  S3_ACCESS_KEY: z.string().min(1, 'S3_ACCESS_KEY is required'),
+  S3_SECRET_KEY: z.string().min(1, 'S3_SECRET_KEY is required'),
   S3_BUCKET: z.string().default('mcq-platform'),
   S3_REGION: z.string().default('us-east-1'),
   S3_FORCE_PATH_STYLE: z

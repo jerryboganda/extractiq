@@ -1,0 +1,2271 @@
+openapi: 3.0.3
+info:
+  title: ExtractIQ MCQ Platform API
+  description: |
+    REST API for the ExtractIQ MCQ Platform — an AI-powered Multiple Choice Question
+    extraction and management system. Supports document upload, AI-driven MCQ generation,
+    human review workflows, and multi-format export.
+  version: 1.0.0
+  contact:
+    name: ExtractIQ Team
+
+servers:
+  - url: /api/v1
+    description: API v1
+
+tags:
+  - name: Health
+    description: Health checks, metrics, and queue monitoring
+  - name: Auth
+    description: Authentication and session management
+  - name: Dashboard
+    description: Dashboard statistics and activity feeds
+  - name: Projects
+    description: Project CRUD operations
+  - name: Documents
+    description: Document upload and management
+  - name: Jobs
+    description: MCQ extraction job management
+  - name: MCQ
+    description: MCQ record CRUD and version history
+  - name: Review
+    description: Human review workflow
+  - name: Providers
+    description: AI provider configuration and testing
+  - name: Export
+    description: Multi-format MCQ export
+  - name: Analytics
+    description: Analytics and reporting
+  - name: Users
+    description: User and invitation management
+  - name: Workspace
+    description: Workspace settings and usage
+  - name: Audit
+    description: Audit log
+  - name: Notifications
+    description: User notifications
+  - name: Search
+    description: Global search
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+          minimum: 1
+          default: 1
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+
+    PaginatedResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items: {}
+        meta:
+          type: object
+          properties:
+            page:
+              type: integer
+            limit:
+              type: integer
+            total:
+              type: integer
+            totalPages:
+              type: integer
+
+    DateRange:
+      type: object
+      properties:
+        range:
+          type: string
+          enum: [7d, 30d, 90d, custom]
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        statusCode:
+          type: integer
+
+    Success:
+      type: object
+      properties:
+        success:
+          type: boolean
+
+    RegisterRequest:
+      type: object
+      required: [email, password, name, workspaceName]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 12
+        name:
+          type: string
+        workspaceName:
+          type: string
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+
+    ChangePasswordRequest:
+      type: object
+      required: [currentPassword, newPassword]
+      properties:
+        currentPassword:
+          type: string
+        newPassword:
+          type: string
+          minLength: 12
+
+    TokenPair:
+      type: object
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+
+    UserProfile:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        name:
+          type: string
+        role:
+          type: string
+        workspaceId:
+          type: string
+          format: uuid
+
+    CreateProjectRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+
+    UpdateProjectRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+
+    ProjectResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    PresignUploadRequest:
+      type: object
+      required: [filename, contentType, fileSize, projectId]
+      properties:
+        filename:
+          type: string
+        contentType:
+          type: string
+        fileSize:
+          type: integer
+        projectId:
+          type: string
+          format: uuid
+
+    CompleteUploadRequest:
+      type: object
+      required: [uploadId, s3Key]
+      properties:
+        uploadId:
+          type: string
+        s3Key:
+          type: string
+        checksumSha256:
+          type: string
+
+    DocumentResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        filename:
+          type: string
+        contentType:
+          type: string
+        fileSize:
+          type: integer
+        status:
+          type: string
+        projectId:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateJobRequest:
+      type: object
+      required: [documentIds, projectId]
+      properties:
+        documentIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        projectId:
+          type: string
+          format: uuid
+        extractionProfile:
+          type: string
+
+    JobResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+        projectId:
+          type: string
+          format: uuid
+        progress:
+          type: number
+        createdAt:
+          type: string
+          format: date-time
+
+    MCQCardResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        questionText:
+          type: string
+        options:
+          type: array
+          items:
+            type: string
+        correctAnswer:
+          type: integer
+        explanation:
+          type: string
+        difficulty:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        confidence:
+          type: number
+        version:
+          type: integer
+
+    UpdateMcqRecordRequest:
+      type: object
+      required: [version]
+      properties:
+        questionText:
+          type: string
+        options:
+          type: array
+          items:
+            type: string
+        correctAnswer:
+          type: integer
+        explanation:
+          type: string
+        difficulty:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        version:
+          type: integer
+
+    ReviewEditRequest:
+      type: object
+      properties:
+        question:
+          type: string
+        options:
+          type: array
+          items:
+            type: string
+        correctIndex:
+          type: integer
+        explanation:
+          type: string
+        difficulty:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        reviewerNotes:
+          type: string
+
+    ReviewFlagRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+        notes:
+          type: string
+
+    ReviewBulkRequest:
+      type: object
+      required: [ids, action]
+      properties:
+        ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        action:
+          type: string
+          enum: [approve, reject, flag]
+        reason:
+          type: string
+
+    CreateProviderRequest:
+      type: object
+      required: [displayName, category, providerType, apiKey, models]
+      properties:
+        displayName:
+          type: string
+        category:
+          type: string
+        providerType:
+          type: string
+        apiKey:
+          type: string
+        models:
+          type: array
+          items:
+            type: string
+        config:
+          type: object
+
+    UpdateProviderRequest:
+      type: object
+      properties:
+        displayName:
+          type: string
+        apiKey:
+          type: string
+        models:
+          type: array
+          items:
+            type: string
+        config:
+          type: object
+        isEnabled:
+          type: boolean
+
+    ProviderResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        displayName:
+          type: string
+        category:
+          type: string
+        providerType:
+          type: string
+        models:
+          type: array
+          items:
+            type: string
+        isEnabled:
+          type: boolean
+
+    CreateExportRequest:
+      type: object
+      required: [format, projectId]
+      properties:
+        format:
+          type: string
+          enum: [json, csv, qti, scorm, xapi]
+        projectId:
+          type: string
+          format: uuid
+        dateFrom:
+          type: string
+          format: date-time
+        dateTo:
+          type: string
+          format: date-time
+        minConfidence:
+          type: number
+          minimum: 0
+          maximum: 1
+        status:
+          type: string
+
+    ExportHistoryItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        format:
+          type: string
+        status:
+          type: string
+        projectId:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+
+    InviteUserRequest:
+      type: object
+      required: [email, role]
+      properties:
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+
+    UpdateUserRequest:
+      type: object
+      properties:
+        role:
+          type: string
+        status:
+          type: string
+        name:
+          type: string
+
+    UserResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        name:
+          type: string
+        role:
+          type: string
+        status:
+          type: string
+
+    UpdateWorkspaceRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        maxFileSizeMb:
+          type: integer
+        autoApproveThreshold:
+          type: number
+        emailNotifications:
+          type: boolean
+        webhookUrl:
+          type: string
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid authentication token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Insufficient permissions
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+paths:
+  # ── Health ──────────────────────────────────────────────────
+  /health:
+    get:
+      tags: [Health]
+      summary: Basic health check
+      operationId: getHealth
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  timestamp:
+                    type: string
+                    format: date-time
+
+  /health/ready:
+    get:
+      tags: [Health]
+      summary: Readiness check (DB, Redis, S3)
+      operationId: getReadiness
+      responses:
+        '200':
+          description: All dependencies ready
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  timestamp:
+                    type: string
+                    format: date-time
+                  checks:
+                    type: object
+                    properties:
+                      database:
+                        type: string
+                      redis:
+                        type: string
+                      storage:
+                        type: string
+
+  /health/metrics:
+    get:
+      tags: [Health]
+      summary: Application metrics
+      operationId: getMetrics
+      responses:
+        '200':
+          description: Metrics snapshot
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  uptime:
+                    type: number
+                  totalRequests:
+                    type: integer
+                  errorRate:
+                    type: number
+                  avgLatencyMs:
+                    type: number
+                  statusCodes:
+                    type: object
+                    additionalProperties:
+                      type: integer
+                  startedAt:
+                    type: string
+                    format: date-time
+
+  /health/queues:
+    get:
+      tags: [Health]
+      summary: Queue depth monitoring
+      operationId: getQueueDepths
+      responses:
+        '200':
+          description: Queue depths for all registered queues
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  queues:
+                    type: object
+                    additionalProperties:
+                      type: object
+                      properties:
+                        waiting:
+                          type: integer
+                        active:
+                          type: integer
+                        delayed:
+                          type: integer
+                        failed:
+                          type: integer
+
+  # ── Auth ────────────────────────────────────────────────────
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a new user and workspace
+      operationId: register
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: User created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/UserProfile'
+                  - $ref: '#/components/schemas/TokenPair'
+        '409':
+          description: Email already registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Authenticate and obtain tokens
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Authentication successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenPair'
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Invalidate current session
+      operationId: logout
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Success'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Refresh access token
+      operationId: refreshToken
+      responses:
+        '200':
+          description: New token pair
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenPair'
+        '401':
+          description: Invalid or expired refresh token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/change-password:
+    post:
+      tags: [Auth]
+      summary: Change current user password
+      operationId: changePassword
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangePasswordRequest'
+      responses:
+        '200':
+          description: Password changed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Success'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Get current user profile
+      operationId: getCurrentUser
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Current user profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ── Dashboard ───────────────────────────────────────────────
+  /dashboard/stats:
+    get:
+      tags: [Dashboard]
+      summary: Dashboard summary statistics
+      operationId: getDashboardStats
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Dashboard statistics
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /dashboard/sparklines:
+    get:
+      tags: [Dashboard]
+      summary: Sparkline chart data
+      operationId: getDashboardSparklines
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Sparkline data points
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /dashboard/active-jobs:
+    get:
+      tags: [Dashboard]
+      summary: Currently active extraction jobs
+      operationId: getActiveJobs
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: List of active jobs
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /dashboard/recent-activity:
+    get:
+      tags: [Dashboard]
+      summary: Recent activity feed
+      operationId: getRecentActivity
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Activity log entries
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /dashboard/provider-health:
+    get:
+      tags: [Dashboard]
+      summary: AI provider health status
+      operationId: getProviderHealth
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Provider health data
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ── Projects ────────────────────────────────────────────────
+  /projects:
+    get:
+      tags: [Projects]
+      summary: List projects
+      operationId: listProjects
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Paginated project list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ProjectResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Projects]
+      summary: Create a project
+      operationId: createProject
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProjectRequest'
+      responses:
+        '201':
+          description: Project created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /projects/{id}:
+    get:
+      tags: [Projects]
+      summary: Get project by ID
+      operationId: getProject
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Project details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Projects]
+      summary: Update a project
+      operationId: updateProject
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProjectRequest'
+      responses:
+        '200':
+          description: Project updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Projects]
+      summary: Delete a project
+      operationId: deleteProject
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Project deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Success'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ── Documents ───────────────────────────────────────────────
+  /documents:
+    get:
+      tags: [Documents]
+      summary: List documents
+      operationId: listDocuments
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Paginated document list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/DocumentResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /documents/presign:
+    post:
+      tags: [Documents]
+      summary: Get presigned upload URL
+      operationId: presignUpload
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PresignUploadRequest'
+      responses:
+        '200':
+          description: Presigned URL and upload ID
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  uploadUrl:
+                    type: string
+                    format: uri
+                  uploadId:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /documents/complete:
+    post:
+      tags: [Documents]
+      summary: Complete upload and create document record
+      operationId: completeUpload
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompleteUploadRequest'
+      responses:
+        '201':
+          description: Document created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /documents/{id}:
+    get:
+      tags: [Documents]
+      summary: Get document by ID
+      operationId: getDocument
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Document details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Documents]
+      summary: Delete a document
+      operationId: deleteDocument
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Document deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Success'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ── Jobs ────────────────────────────────────────────────────
+  /jobs:
+    get:
+      tags: [Jobs]
+      summary: List extraction jobs
+      operationId: listJobs
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Paginated job list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/JobResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Jobs]
+      summary: Create an extraction job
+      operationId: createJob
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateJobRequest'
+      responses:
+        '201':
+          description: Job created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /jobs/{id}:
+    get:
+      tags: [Jobs]
+      summary: Get job by ID
+      operationId: getJob
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Job details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /jobs/{id}/cancel:
+    post:
+      tags: [Jobs]
+      summary: Cancel a running job
+      operationId: cancelJob
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Job cancelled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Success'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /jobs/{id}/retry:
+    post:
+      tags: [Jobs]
+      summary: Retry a failed job
+      operationId: retryJob
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Job retried
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Success'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ── MCQ Records ─────────────────────────────────────────────
+  /mcq:
+    get:
+      tags: [MCQ]
+      summary: List MCQ records
+      operationId: listMcqRecords
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Paginated MCQ list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/MCQCardResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /mcq/{id}:
+    get:
+      tags: [MCQ]
+      summary: Get MCQ record by ID
+      operationId: getMcqRecord
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: MCQ record details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MCQCardResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [MCQ]
+      summary: Update an MCQ record (optimistic locking via version)
+      operationId: updateMcqRecord
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateMcqRecordRequest'
+      responses:
+        '200':
+          description: MCQ record updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MCQCardResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Version conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags: [MCQ]
+      summary: Delete an MCQ record
+      operationId: deleteMcqRecord
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: MCQ record deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Success'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /mcq/{id}/history:
+    get:
+      tags: [MCQ]
+      summary: Get version history of an MCQ record
+      operationId: getMcqHistory
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Version history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ── Review ──────────────────────────────────────────────────
+  /review/queue:
+    get:
+      tags: [Review]
+      summary: List review queue items
+      operationId: listReviewQueue
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Paginated review queue
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /review/{id}:
+    get:
+      tags: [Review]
+      summary: Get review detail
+      operationId: getReviewDetail
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Review detail
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /review/{id}/approve:
+    post:
+      tags: [Review]
+      summary: Approve a review item
+      operationId: approveReview
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Review approved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Success'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /review/{id}/reject:
+    post:
+      tags: [Review]
+      summary: Reject a review item
+      operationId: rejectReview
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Review rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Success'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /review/{id}/flag:
+    post:
+      tags: [Review]
+      summary: Flag a review item
+      operationId: flagReview
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewFlagRequest'
+      responses:
+        '200':
+          description: Review flagged
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Success'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /review/{id}/edit:
+    patch:
+      tags: [Review]
+      summary: Edit a review item
+      operationId: editReview
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewEditRequest'
+      responses:
+        '200':
+          description: Review edited
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /review/{id}/navigation:
+    get:
+      tags: [Review]
+      summary: Get navigation context for review item
+      operationId: getReviewNavigation
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Navigation context (prev/next IDs)
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /review/bulk:
+    post:
+      tags: [Review]
+      summary: Bulk approve, reject, or flag review items
+      operationId: bulkReview
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewBulkRequest'
+      responses:
+        '200':
+          description: Bulk operation result
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ── Providers ───────────────────────────────────────────────
+  /providers:
+    get:
+      tags: [Providers]
+      summary: List AI providers
+      operationId: listProviders
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Provider list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProviderResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Providers]
+      summary: Create an AI provider
+      operationId: createProvider
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProviderRequest'
+      responses:
+        '201':
+          description: Provider created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /providers/{id}:
+    get:
+      tags: [Providers]
+      summary: Get provider by ID
+      operationId: getProvider
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Provider details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      tags: [Providers]
+      summary: Update a provider
+      operationId: updateProvider
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProviderRequest'
+      responses:
+        '200':
+          description: Provider updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Providers]
+      summary: Delete a provider
+      operationId: deleteProvider
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Provider deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Success'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /providers/{id}/test:
+    post:
+      tags: [Providers]
+      summary: Test provider connectivity
+      operationId: testProvider
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Test result
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /providers/{id}/benchmarks:
+    get:
+      tags: [Providers]
+      summary: Get provider benchmark data
+      operationId: getProviderBenchmarks
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Benchmark data
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ── Export ──────────────────────────────────────────────────
+  /export:
+    get:
+      tags: [Export]
+      summary: List export history
+      operationId: listExports
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Paginated export history
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ExportHistoryItem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [Export]
+      summary: Create a new export
+      operationId: createExport
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateExportRequest'
+      responses:
+        '201':
+          description: Export created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExportHistoryItem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /export/{id}:
+    get:
+      tags: [Export]
+      summary: Get export by ID
+      operationId: getExport
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Export details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExportHistoryItem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /export/{id}/download:
+    get:
+      tags: [Export]
+      summary: Download export file
+      operationId: downloadExport
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: File stream
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ── Analytics ───────────────────────────────────────────────
+  /analytics/time-series:
+    get:
+      tags: [Analytics]
+      summary: Time-series MCQ generation data
+      operationId: getTimeSeries
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: range
+          in: query
+          schema:
+            type: string
+            enum: [7d, 30d, 90d, custom]
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Time-series data points
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /analytics/confidence-distribution:
+    get:
+      tags: [Analytics]
+      summary: MCQ confidence score distribution
+      operationId: getConfidenceDistribution
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Confidence distribution buckets
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /analytics/provider-comparison:
+    get:
+      tags: [Analytics]
+      summary: AI provider performance comparison
+      operationId: getProviderComparison
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Provider comparison data
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /analytics/processing-time:
+    get:
+      tags: [Analytics]
+      summary: Processing time trends
+      operationId: getProcessingTime
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: range
+          in: query
+          schema:
+            type: string
+            enum: [7d, 30d, 90d, custom]
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Processing time trend data
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /analytics/cost-breakdown:
+    get:
+      tags: [Analytics]
+      summary: Cost breakdown by provider and time
+      operationId: getCostBreakdown
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: range
+          in: query
+          schema:
+            type: string
+            enum: [7d, 30d, 90d, custom]
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Cost breakdown data
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /analytics/summary:
+    get:
+      tags: [Analytics]
+      summary: Analytics summary overview
+      operationId: getAnalyticsSummary
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Summary statistics
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ── Users ───────────────────────────────────────────────────
+  /users:
+    get:
+      tags: [Users]
+      summary: List workspace users
+      operationId: listUsers
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Paginated user list
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/UserResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /users/invite:
+    post:
+      tags: [Users]
+      summary: Invite a user to the workspace
+      operationId: inviteUser
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InviteUserRequest'
+      responses:
+        '201':
+          description: Invitation sent
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /users/{id}:
+    patch:
+      tags: [Users]
+      summary: Update a user (role, status, name)
+      operationId: updateUser
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserRequest'
+      responses:
+        '200':
+          description: User updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags: [Users]
+      summary: Deactivate a user
+      operationId: deactivateUser
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: User deactivated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Success'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ── Workspace ───────────────────────────────────────────────
+  /workspace:
+    get:
+      tags: [Workspace]
+      summary: Get workspace settings
+      operationId: getWorkspace
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Workspace settings
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    patch:
+      tags: [Workspace]
+      summary: Update workspace settings
+      operationId: updateWorkspace
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateWorkspaceRequest'
+      responses:
+        '200':
+          description: Workspace updated
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /workspace/usage:
+    get:
+      tags: [Workspace]
+      summary: Get workspace usage statistics
+      operationId: getWorkspaceUsage
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Usage statistics
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ── Audit ───────────────────────────────────────────────────
+  /audit:
+    get:
+      tags: [Audit]
+      summary: List audit log entries
+      operationId: listAuditLogs
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Paginated audit log
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ── Notifications ───────────────────────────────────────────
+  /notifications:
+    get:
+      tags: [Notifications]
+      summary: List user notifications
+      operationId: listNotifications
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Notification list
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /notifications/{id}/read:
+    patch:
+      tags: [Notifications]
+      summary: Mark a notification as read
+      operationId: markNotificationRead
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Notification marked as read
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Success'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /notifications/read-all:
+    post:
+      tags: [Notifications]
+      summary: Mark all notifications as read
+      operationId: markAllNotificationsRead
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: All notifications marked as read
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Success'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ── Search ──────────────────────────────────────────────────
+  /search:
+    get:
+      tags: [Search]
+      summary: Global search across MCQs, documents, and projects
+      operationId: search
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Search query
+      responses:
+        '200':
+          description: Search results
+        '401':
+          $ref: '#/components/responses/Unauthorized'

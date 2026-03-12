@@ -46,11 +46,17 @@ export function AppLayout({ children }: AppLayoutProps) {
 
   return (
     <SidebarProvider>
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-primary-foreground focus:text-sm"
+      >
+        Skip to main content
+      </a>
       <div className="min-h-screen flex w-full">
         <AppSidebar />
         <div className="flex-1 flex flex-col min-w-0">
           <AppHeader />
-          <main className="flex-1 p-4 sm:p-6 overflow-auto scrollbar-thin">
+          <main id="main-content" className="flex-1 p-4 sm:p-6 overflow-auto scrollbar-thin">
             <AnimatePresence mode="wait">
               <PageTransition key={location.pathname}>
                 {children || <Outlet />}

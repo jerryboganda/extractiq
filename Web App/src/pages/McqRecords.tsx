@@ -10,19 +10,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { StaggerContainer, StaggerItem } from "@/components/StaggerContainer";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
-
-export const mockMcqs = [
-  { id: "mcq_01", question: "Which enzyme catalyzes the rate-limiting step of glycolysis?", options: ["Hexokinase", "Phosphofructokinase-1", "Pyruvate kinase", "Glucokinase"], correct: 1, difficulty: "Medium", tags: ["Biochemistry", "Glycolysis"], confidence: 97.2 },
-  { id: "mcq_02", question: "The sinoatrial node is located in which chamber of the heart?", options: ["Left atrium", "Right atrium", "Left ventricle", "Right ventricle"], correct: 1, difficulty: "Easy", tags: ["Anatomy", "Cardiology"], confidence: 94.8 },
-  { id: "mcq_03", question: "What is the mechanism of action of metformin?", options: ["Insulin secretagogue", "AMPK activator", "DPP-4 inhibitor", "SGLT2 inhibitor"], correct: 1, difficulty: "Hard", tags: ["Pharmacology", "Endocrinology"], confidence: 68.3 },
-  { id: "mcq_04", question: "Which vitamin deficiency causes scurvy?", options: ["Vitamin A", "Vitamin B12", "Vitamin C", "Vitamin D"], correct: 2, difficulty: "Easy", tags: ["Nutrition", "Pathology"], confidence: 99.1 },
-  { id: "mcq_05", question: "The Krebs cycle occurs in which cellular compartment?", options: ["Cytoplasm", "Mitochondrial matrix", "Nucleus", "Endoplasmic reticulum"], correct: 1, difficulty: "Easy", tags: ["Biochemistry", "Cell Biology"], confidence: 96.5 },
-  { id: "mcq_06", question: "Which drug is a selective COX-2 inhibitor?", options: ["Aspirin", "Ibuprofen", "Celecoxib", "Acetaminophen"], correct: 2, difficulty: "Medium", tags: ["Pharmacology", "Anti-inflammatory"], confidence: 82.4 },
-  { id: "mcq_07", question: "What is the most common cause of community-acquired pneumonia?", options: ["Staphylococcus aureus", "Streptococcus pneumoniae", "Haemophilus influenzae", "Klebsiella pneumoniae"], correct: 1, difficulty: "Medium", tags: ["Microbiology", "Pulmonology"], confidence: 78.9 },
-  { id: "mcq_08", question: "Which structure passes through the foramen magnum?", options: ["Internal carotid artery", "Vertebral arteries", "External jugular vein", "Facial nerve"], correct: 1, difficulty: "Hard", tags: ["Anatomy", "Neurology"], confidence: 55.2 },
-  { id: "mcq_09", question: "CYP3A4 is primarily found in which organ?", options: ["Kidney", "Heart", "Liver", "Lung"], correct: 2, difficulty: "Hard", tags: ["Pharmacology", "Metabolism"], confidence: 61.7 },
-  { id: "mcq_10", question: "Normal adult resting heart rate range is:", options: ["40-60 bpm", "60-100 bpm", "80-120 bpm", "100-140 bpm"], correct: 1, difficulty: "Easy", tags: ["Physiology", "Cardiology"], confidence: 98.3 },
-];
+import { useMcqRecords } from "@/hooks/use-api";
 
 const difficultyColors: Record<string, string> = {
   Easy: "bg-success/10 text-success border-success/20",
@@ -39,16 +27,21 @@ export default function McqRecords() {
   const [confidence, setConfidence] = useState<ConfidenceFilter>("All");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
+  const { data: mcqData } = useMcqRecords({
+    confidence: confidence !== 'All' ? confidence.toLowerCase() : undefined,
+  });
+  const allMcqs = mcqData?.items ?? [];
+
   const filtered = useMemo(() => {
-    return mockMcqs.filter((mcq) => {
+    return allMcqs.filter((mcq: any) => {
       if (difficulty !== "All" && mcq.difficulty !== difficulty) return false;
       if (confidence === "High" && mcq.confidence < 90) return false;
       if (confidence === "Medium" && (mcq.confidence < 70 || mcq.confidence >= 90)) return false;
       if (confidence === "Low" && mcq.confidence >= 70) return false;
-      if (search && !mcq.question.toLowerCase().includes(search.toLowerCase())) return false;
+      if (search && !(mcq.question || '').toLowerCase().includes(search.toLowerCase())) return false;
       return true;
     });
-  }, [difficulty, confidence, search]);
+  }, [difficulty, confidence, search, allMcqs]);
 
   const allSelected = filtered.length > 0 && filtered.every((m) => selectedIds.has(m.id));
   const toggleAll = useCallback(() => {

@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Plus, Settings, Zap, Server, Loader2, Edit, Star, PowerOff, Trash2 } from "lucide-react";
-import { mockProviders } from "@/lib/mock-data";
+import { useProviders, useTestProvider, useDeleteProvider } from "@/hooks/use-api";
 import { toast } from "sonner";
 import { StaggerContainer, StaggerItem } from "@/components/StaggerContainer";
 import { UpgradeBanner } from "@/components/UpgradeBanner";
@@ -20,19 +20,18 @@ export default function Providers() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [testingId, setTestingId] = useState<string | null>(null);
 
-  const filtered = mockProviders.filter((p) => statusFilter === "all" || p.status === statusFilter);
+  const { data: providersData } = useProviders();
+  const testProvider = useTestProvider();
+  const deleteProvider = useDeleteProvider();
+  const allProviders = providersData ?? [];
 
-  const handleTest = (provider: typeof mockProviders[0]) => {
+  const filtered = allProviders.filter((p: any) => statusFilter === "all" || p.status === statusFilter);
+
+  const handleTest = (provider: any) => {
     setTestingId(provider.id);
-    const latency = (Math.random() * 3 + 1).toFixed(1);
-    setTimeout(() => {
-      setTestingId(null);
-      if (provider.status === "offline") {
-        toast.error(`${provider.name}: Connection failed`);
-      } else {
-        toast.success(`${provider.name}: ${latency}s latency — OK`);
-      }
-    }, 1500);
+    testProvider.mutate(provider.id, {
+      onSettled: () => setTestingId(null),
+    });
   };
 
   return (
@@ -89,7 +88,7 @@ export default function Providers() {
                           <PowerOff className="h-3.5 w-3.5" /> {provider.status === "offline" ? "Enable" : "Disable"}
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
-                        <DropdownMenuItem className="gap-2 text-destructive focus:text-destructive" onClick={() => toast.success(`${provider.name} removed`)}>
+                        <DropdownMenuItem className="gap-2 text-destructive focus:text-destructive" onClick={() => deleteProvider.mutate(provider.id)}>
                           <Trash2 className="h-3.5 w-3.5" /> Remove
                         </DropdownMenuItem>
                       </DropdownMenuContent>

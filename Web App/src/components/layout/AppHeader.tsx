@@ -12,7 +12,7 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { mockUser } from "@/lib/mock-data";
+import { useAuth } from "@/contexts/AuthContext";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -43,6 +43,11 @@ export function AppHeader() {
   const location = useLocation();
   const currentLabel = routeLabels[location.pathname] || "Page";
   const openCommandPalette = useCommandPaletteOpen();
+  const { user, logout } = useAuth();
+
+  const initials = user?.name
+    ? user.name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2)
+    : '?';
 
   return (
     <header className="sticky top-0 z-30 flex h-14 items-center gap-2 sm:gap-3 border-b border-border bg-background/80 backdrop-blur-sm px-3 sm:px-4">
@@ -95,21 +100,21 @@ export function AppHeader() {
           <Button variant="ghost" className="h-8 w-8 rounded-full p-0">
             <Avatar className="h-7 w-7">
               <AvatarFallback className="text-[11px] bg-primary text-primary-foreground font-semibold">
-                {mockUser.initials}
+                {initials}
               </AvatarFallback>
             </Avatar>
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-48">
           <div className="px-2 py-1.5">
-            <p className="text-sm font-medium">{mockUser.name}</p>
-            <p className="text-xs text-muted-foreground">{mockUser.email}</p>
+            <p className="text-sm font-medium">{user?.name || 'User'}</p>
+            <p className="text-xs text-muted-foreground">{user?.email || ''}</p>
           </div>
           <DropdownMenuSeparator />
           <DropdownMenuItem>Profile</DropdownMenuItem>
           <DropdownMenuItem>Preferences</DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem>Sign out</DropdownMenuItem>
+          <DropdownMenuItem onClick={() => logout()}>Sign out</DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
     </header>

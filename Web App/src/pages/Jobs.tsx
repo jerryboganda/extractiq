@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,8 +9,7 @@ import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription,
 } from "@/components/ui/sheet";
 import { Search, RefreshCw, Eye, Briefcase, RotateCcw, Trash2, XCircle, X } from "lucide-react";
-import { mockJobs } from "@/lib/mock-data";
-import type { JobStatus } from "@/lib/mock-data";
+import { useJobs } from "@/hooks/use-api";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/EmptyState";
 import { toast } from "sonner";
@@ -83,7 +82,7 @@ const mockLogs = [
   "[14:33:15] Extracted 24/48 pages processed...",
 ];
 
-const sortGetters: Record<string, (j: typeof mockJobs[0]) => string | number> = {
+const sortGetters: Record<string, (j: any) => string | number> = {
   documentName: (j) => j.documentName,
   status: (j) => j.status,
   provider: (j) => j.provider,
@@ -95,35 +94,18 @@ export default function Jobs() {
   const PAGE_SIZE = 10;
   const [tab, setTab] = useState("all");
   const [search, setSearch] = useState("");
-  const [selectedJob, setSelectedJob] = useState<typeof mockJobs[0] | null>(null);
+  const [selectedJob, setSelectedJob] = useState<any | null>(null);
   const [sort, setSort] = useState<SortConfig | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [liveJobs, setLiveJobs] = useState(mockJobs);
   const [page, setPage] = useState(1);
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setLiveJobs((prev) =>
-        prev.map((job) => {
-          if (job.status !== "processing") return job;
-          const increment = Math.floor(Math.random() * 5) + 1;
-          const newProgress = Math.min(job.progress + increment, 100);
-          const newStage = Math.min(Math.floor(newProgress / 20), 5);
-          if (newProgress >= 100) {
-            toast.success(`${job.documentName} — extraction complete!`);
-            return { ...job, progress: 100, status: "completed" as const, currentStage: 5 };
-          }
-          return { ...job, progress: newProgress, currentStage: newStage };
-        })
-      );
-    }, 3000);
-    return () => clearInterval(interval);
-  }, []);
+  const { data: jobsData } = useJobs({ status: tab !== 'all' ? tab : undefined });
+  const liveJobs = jobsData?.items ?? [];
 
   const filtered = useMemo(() => {
-    return liveJobs.filter((job) => {
+    return liveJobs.filter((job: any) => {
       if (tab !== "all" && job.status !== tab) return false;
-      if (search && !job.documentName.toLowerCase().includes(search.toLowerCase())) return false;
+      if (search && !(job.documentName || job.name || '').toLowerCase().includes(search.toLowerCase())) return false;
       return true;
     });
   }, [tab, search, liveJobs]);

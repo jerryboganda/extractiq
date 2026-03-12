@@ -211,4 +211,12 @@ export function buildExportKey(
   return `workspaces/${workspaceId}/exports/${exportId}/${filename}`;
 }
 
+/**
+ * Check S3/MinIO bucket accessibility (used by health checks).
+ */
+export async function checkBucket(): Promise<void> {
+  const { HeadBucketCommand } = await import('@aws-sdk/client-s3');
+  await s3.send(new HeadBucketCommand({ Bucket: BUCKET }));
+}
+
 export { s3, BUCKET };

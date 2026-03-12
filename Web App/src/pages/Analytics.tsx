@@ -7,12 +7,13 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from "recharts";
 import {
-  mockAnalyticsTimeSeries,
-  mockConfidenceDistribution,
-  mockProviderComparison,
-  mockProcessingTimeTrend,
-  mockCostBreakdown,
-} from "@/lib/mock-data";
+  useAnalyticsTimeSeries,
+  useConfidenceDistribution,
+  useProviderComparison,
+  useProcessingTimeTrend,
+  useCostBreakdown,
+  useAnalyticsSummary,
+} from "@/hooks/use-api";
 import { StaggerContainer, StaggerItem } from "@/components/StaggerContainer";
 import { UpgradeBanner } from "@/components/UpgradeBanner";
 
@@ -37,6 +38,26 @@ const tooltipStyle = {
 export default function Analytics() {
   const [range, setRange] = useState<string>("30 days");
 
+  const { data: timeSeries } = useAnalyticsTimeSeries({ days: range === '7 days' ? 7 : range === '90 days' ? 90 : 30 });
+  const { data: confidenceDistribution } = useConfidenceDistribution();
+  const { data: providerComparison } = useProviderComparison();
+  const { data: processingTimeTrend } = useProcessingTimeTrend();
+  const { data: costBreakdown } = useCostBreakdown();
+  const { data: summary } = useAnalyticsSummary();
+
+  const analyticsTimeSeries = timeSeries ?? [];
+  const analyticsConfidenceDistribution = confidenceDistribution ?? [];
+  const analyticsProviderComparison = providerComparison ?? [];
+  const analyticsProcessingTimeTrend = processingTimeTrend ?? [];
+  const analyticsCostBreakdown = costBreakdown ?? [];
+
+  const kpis = summary ? [
+    { label: "Total Extractions", value: summary.totalExtractions?.toLocaleString() ?? '0', change: summary.extractionsChange ?? '+0%', icon: BarChart3, positive: !summary.extractionsChange?.startsWith('-') },
+    { label: "Avg Confidence", value: `${summary.avgConfidence ?? 0}%`, change: summary.confidenceChange ?? '+0%', icon: TrendingUp, positive: !summary.confidenceChange?.startsWith('-') },
+    { label: "Total Cost", value: `$${summary.totalCost?.toLocaleString() ?? '0'}`, change: summary.costChange ?? '+0%', icon: DollarSign, positive: summary.costChange?.startsWith('-') },
+    { label: "Rejection Rate", value: `${summary.rejectionRate ?? 0}%`, change: summary.rejectionChange ?? '+0%', icon: AlertTriangle, positive: summary.rejectionChange?.startsWith('-') },
+  ] : mockKpis;
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
@@ -59,7 +80,7 @@ export default function Analytics() {
       </div>
 
       <StaggerContainer className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {mockKpis.map((kpi) => (
+        {kpis.map((kpi) => (
           <StaggerItem key={kpi.label}>
             <Card className="glass border-border">
               <CardContent className="p-5">
@@ -81,7 +102,7 @@ export default function Analytics() {
             <CardHeader><CardTitle className="text-base">Extraction Volume</CardTitle></CardHeader>
             <CardContent>
               <ResponsiveContainer width="100%" height={264}>
-                <AreaChart data={mockAnalyticsTimeSeries} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
+                <AreaChart data={analyticsTimeSeries} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
                   <defs>
                     <linearGradient id="mcqGrad" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
@@ -104,7 +125,7 @@ export default function Analytics() {
             <CardHeader><CardTitle className="text-base">Provider Comparison</CardTitle></CardHeader>
             <CardContent>
               <ResponsiveContainer width="100%" height={264}>
-                <BarChart data={mockProviderComparison} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
+                <BarChart data={analyticsProviderComparison} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                   <XAxis dataKey="provider" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} />
                   <YAxis tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} />
@@ -127,7 +148,7 @@ export default function Analytics() {
             <CardHeader><CardTitle className="text-base">Processing Time Trend</CardTitle></CardHeader>
             <CardContent>
               <ResponsiveContainer width="100%" height={264}>
-                <LineChart data={mockProcessingTimeTrend} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
+                <LineChart data={analyticsProcessingTimeTrend} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                   <XAxis dataKey="date" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} />
                   <YAxis tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} unit="m" />
@@ -146,7 +167,7 @@ export default function Analytics() {
             <CardHeader><CardTitle className="text-base">Cost Breakdown by Provider</CardTitle></CardHeader>
             <CardContent>
               <ResponsiveContainer width="100%" height={264}>
-                <BarChart data={mockCostBreakdown} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
+                <BarChart data={analyticsCostBreakdown} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                   <XAxis dataKey="week" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} />
                   <YAxis tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} unit="$" />
@@ -171,7 +192,7 @@ export default function Analytics() {
             <ResponsiveContainer width={220} height={220}>
               <PieChart>
                 <Pie
-                  data={mockConfidenceDistribution}
+                  data={analyticsConfidenceDistribution}
                   cx="50%"
                   cy="50%"
                   innerRadius={60}
@@ -181,7 +202,7 @@ export default function Analytics() {
                   nameKey="range"
                   animationDuration={800}
                 >
-                  {mockConfidenceDistribution.map((entry, idx) => (
+                  {analyticsConfidenceDistribution.map((entry: any, idx: number) => (
                     <Cell key={idx} fill={entry.fill} />
                   ))}
                 </Pie>
@@ -189,7 +210,7 @@ export default function Analytics() {
               </PieChart>
             </ResponsiveContainer>
             <div className="space-y-3">
-              {mockConfidenceDistribution.map((b) => (
+              {analyticsConfidenceDistribution.map((b: any) => (
                 <div key={b.range} className="flex items-center gap-3">
                   <div className="h-3 w-3 rounded-full" style={{ background: b.fill }} />
                   <span className="text-sm text-muted-foreground w-16">{b.range}</span>

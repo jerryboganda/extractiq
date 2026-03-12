@@ -112,8 +112,8 @@ sleep 15
 echo "[8/8] Running database migrations..."
 cd "$APP_DIR/Backend"
 npm ci > /dev/null 2>&1
-npx drizzle-kit push --force
-npx tsx packages/db/src/seed.ts 2>/dev/null || true
+npx drizzle-kit migrate
+npx tsx packages/db/src/seed.ts || true
 
 echo ""
 echo "═══════════════════════════════════════"
@@ -124,6 +124,7 @@ echo "  Website:  https://extractiq.polytronx.com"
 echo "  Web App:  https://extractiq.polytronx.com/app"
 echo "  API:      https://extractiq.polytronx.com/api/v1/health"
 echo ""
-echo "  Admin:    admin@extractiq.com / admin123456"
-echo "  (Change immediately after first login)"
+echo "  Admin credentials were printed during seed step above."
+echo "  If this is a fresh deploy, scroll up to find them."
+echo "  Change the password immediately after first login."
 echo ""
