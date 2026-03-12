@@ -134,6 +134,11 @@ const Navbar = () => {
           </nav>
 
           <div className="hidden lg:flex items-center gap-3">
+            <a href="/app/login">
+              <Button variant="ghost" className="text-muted-foreground hover:text-foreground">
+                Login
+              </Button>
+            </a>
             <Link to="/demo">
               <Button className="bg-primary hover:bg-primary/90 text-primary-foreground glow-primary glow-primary-hover transition-all hover:-translate-y-0.5">
                 Start Free Trial
@@ -190,8 +195,13 @@ const Navbar = () => {
                     {link.label}
                   </Link>
                 ))}
+                <a href="/app/login" onClick={() => setOpen(false)}>
+                  <Button variant="outline" className="w-full mt-4">
+                    Login
+                  </Button>
+                </a>
                 <Link to="/demo" onClick={() => setOpen(false)}>
-                  <Button className="w-full mt-4 bg-primary hover:bg-primary/90">
+                  <Button className="w-full mt-2 bg-primary hover:bg-primary/90">
                     Start Free Trial
                   </Button>
                 </Link>

@@ -32,7 +32,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refreshUser = useCallback(async () => {
     try {
-      const res = await api.get<{ data: { user: User } }>('/auth/me');
+      const res = await api.get<{ data: { user: User } }>('/auth/me', { skipAuthRefresh: true });
       setState({ user: res.data.user, isLoading: false, isAuthenticated: true });
     } catch {
       setState({ user: null, isLoading: false, isAuthenticated: false });
