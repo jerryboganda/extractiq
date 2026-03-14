@@ -16,9 +16,13 @@ function createRedisConnection(): IORedis {
   });
 }
 
+const redisUrl = new URL(env.REDIS_URL.replace(/^redis:/, 'http:'));
+
 const connection: ConnectionOptions = {
-  host: new URL(env.REDIS_URL.replace(/^redis:/, 'http:')).hostname,
-  port: parseInt(new URL(env.REDIS_URL.replace(/^redis:/, 'http:')).port || '6379'),
+  host: redisUrl.hostname,
+  port: parseInt(redisUrl.port || '6379'),
+  ...(redisUrl.username ? { username: decodeURIComponent(redisUrl.username) } : {}),
+  ...(redisUrl.password ? { password: decodeURIComponent(redisUrl.password) } : {}),
 };
 
 // ──────────────────────────────────────────────
