@@ -13,6 +13,28 @@ const router = Router();
 
 type CheckStatus = 'ok' | 'error';
 
+async function withTimeout<T>(
+  operation: Promise<T>,
+  label: string,
+  timeoutMs: number = 3_000,
+): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => {
+          reject(new Error(`${label} timed out`));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
+}
+
 async function checkSmtp(timeoutMs: number = 2_000): Promise<void> {
   if (!env.ENABLE_EMAIL_DELIVERY) {
     return;
@@ -43,7 +65,7 @@ export async function runReadinessChecks() {
   const reasons: string[] = [];
 
   try {
-    await db.execute(sql`SELECT 1`);
+    await withTimeout(db.execute(sql`SELECT 1`), 'database check');
     checks.database = 'ok';
   } catch (err) {
     logger.error({ err }, 'Health check: database unavailable');
@@ -52,7 +74,7 @@ export async function runReadinessChecks() {
   }
 
   try {
-    await pingRedis();
+    await withTimeout(pingRedis(), 'redis check');
     checks.redis = 'ok';
   } catch (err) {
     logger.error({ err }, 'Health check: redis unavailable');
@@ -61,7 +83,10 @@ export async function runReadinessChecks() {
   }
 
   try {
-    await getQueue(QUEUE_NAMES.NOTIFICATION).getJobCounts('waiting');
+    await withTimeout(
+      getQueue(QUEUE_NAMES.NOTIFICATION).getJobCounts('waiting'),
+      'queue check',
+    );
     checks.queue = 'ok';
   } catch (err) {
     logger.error({ err }, 'Health check: queue unavailable');
@@ -70,7 +95,7 @@ export async function runReadinessChecks() {
   }
 
   try {
-    await checkBucket();
+    await withTimeout(checkBucket(), 'storage check');
     checks.storage = 'ok';
   } catch (err) {
     logger.error({ err }, 'Health check: storage unavailable');
@@ -79,7 +104,7 @@ export async function runReadinessChecks() {
   }
 
   try {
-    await checkSmtp();
+    await withTimeout(checkSmtp(), 'email transport check');
     checks.email = 'ok';
   } catch (err) {
     logger.error({ err }, 'Health check: email transport unavailable');
