@@ -135,6 +135,45 @@ export const notifications = pgTable('notifications', {
 // ──────────────────────────────────────────────
 // Prompt Versions
 // ──────────────────────────────────────────────
+export const publicSubmissions = pgTable('public_submissions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  submissionType: varchar('submission_type', { length: 30 }).notNull(),
+  fullName: varchar('full_name', { length: 100 }).notNull(),
+  email: varchar('email', { length: 255 }).notNull(),
+  company: varchar('company', { length: 150 }).notNull(),
+  role: varchar('role', { length: 100 }),
+  monthlyVolume: varchar('monthly_volume', { length: 100 }),
+  message: text('message'),
+  status: varchar('status', { length: 20 }).notNull().default('received'),
+  source: varchar('source', { length: 30 }).notNull().default('website'),
+  metadata: jsonb('metadata').notNull().default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index('public_submissions_type_idx').on(t.submissionType),
+  index('public_submissions_status_idx').on(t.status),
+  index('public_submissions_created_at_idx').on(t.createdAt),
+]);
+
+export const emailDeliveries = pgTable('email_deliveries', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  workspaceId: uuid('workspace_id').references(() => workspaces.id, { onDelete: 'cascade' }),
+  notificationId: uuid('notification_id').references(() => notifications.id, { onDelete: 'set null' }),
+  recipient: varchar('recipient', { length: 255 }).notNull(),
+  subject: varchar('subject', { length: 255 }).notNull(),
+  bodyText: text('body_text').notNull(),
+  bodyHtml: text('body_html'),
+  status: varchar('status', { length: 20 }).notNull().default('queued'),
+  relatedType: varchar('related_type', { length: 50 }),
+  relatedId: uuid('related_id'),
+  errorMessage: text('error_message'),
+  sentAt: timestamp('sent_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index('email_deliveries_workspace_id_idx').on(t.workspaceId),
+  index('email_deliveries_status_idx').on(t.status),
+  index('email_deliveries_related_idx').on(t.relatedType, t.relatedId),
+]);
+
 export const promptVersions = pgTable('prompt_versions', {
   id: uuid('id').primaryKey().defaultRandom(),
   promptId: varchar('prompt_id', { length: 100 }).notNull(),

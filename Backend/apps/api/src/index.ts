@@ -16,6 +16,7 @@ import { metricsMiddleware } from './middleware/metrics.js';
 
 // Route modules
 import { authRouter } from './routes/auth/router.js';
+import { publicRouter } from './routes/public/router.js';
 import { projectsRouter } from './routes/projects/router.js';
 import { documentsRouter } from './routes/documents/router.js';
 import { jobsRouter } from './routes/jobs/router.js';
@@ -65,6 +66,7 @@ app.use(rateLimiter);
 const v1 = express.Router();
 
 v1.use('/health', healthRouter);
+v1.use('/public', publicRouter);
 v1.use('/auth', authRouter);
 v1.use('/dashboard', dashboardRouter);
 v1.use('/projects', projectsRouter);

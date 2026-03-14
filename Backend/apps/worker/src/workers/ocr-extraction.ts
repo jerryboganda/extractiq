@@ -2,10 +2,10 @@ import type { Job } from 'bullmq';
 import type { OcrExtractionPayload, TextSegmentationPayload } from '@mcq-platform/queue';
 import { enqueue, QUEUE_NAMES } from '@mcq-platform/queue';
 import { db, documentPages, ocrArtifacts, providerConfigs, jobTasks } from '@mcq-platform/db';
+import { decryptProviderSecret } from '@mcq-platform/auth';
 import { createLogger } from '@mcq-platform/logger';
 import { env } from '@mcq-platform/config';
 import { eq } from 'drizzle-orm';
-import crypto from 'node:crypto';
 
 const logger = createLogger('worker:ocr-extraction');
 
@@ -45,7 +45,7 @@ export async function processOcrExtraction(job: Job<OcrExtractionPayload>) {
   }
 
   // Decrypt API key
-  const apiKey = decryptApiKey(provider.apiKeyEncrypted);
+  const apiKey = decryptProviderSecret(provider.apiKeyEncrypted);
 
   // Call the appropriate OCR provider
   let rawText = '';
@@ -53,7 +53,7 @@ export async function processOcrExtraction(job: Job<OcrExtractionPayload>) {
   let confidence = 0;
 
   switch (provider.providerType) {
-    case 'mistral_ocr':
+    case 'mistral':
       ({ rawText, markdownText, confidence } = await callMistralOcr(
         apiKey,
         page.rawText ?? '',
@@ -199,22 +199,3 @@ async function callGlmOcr(
 // Decrypt provider API key (AES-256-GCM)
 // ──────────────────────────────────────────────
 
-function decryptApiKey(encrypted: string): string {
-  const [ivHex, authTagHex, cipherTextHex] = encrypted.split(':');
-  if (!ivHex || !authTagHex || !cipherTextHex) {
-    throw new Error('Invalid encrypted API key format');
-  }
-
-  const key = Buffer.from(env.ENCRYPTION_KEY, 'hex');
-  const iv = Buffer.from(ivHex, 'hex');
-  const authTag = Buffer.from(authTagHex, 'hex');
-  const cipherText = Buffer.from(cipherTextHex, 'hex');
-
-  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
-  decipher.setAuthTag(authTag);
-
-  let decrypted = decipher.update(cipherText, undefined, 'utf8');
-  decrypted += decipher.final('utf8');
-
-  return decrypted;
-}

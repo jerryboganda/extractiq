@@ -23,7 +23,7 @@ vi.mock('@mcq-platform/logger', () => ({
   createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
 
-import { list, create, getById, update, remove, test as testProvider, getBenchmarks } from './handlers.js';
+import { list, create, getById, update, remove, getBenchmarks } from './handlers.js';
 import { db } from '@mcq-platform/db';
 
 const mockedDb = vi.mocked(db);

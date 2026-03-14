@@ -32,7 +32,7 @@ export async function processPageClassification(job: Job<PageClassificationPaylo
 
   // Determine routing based on text layer presence
   const hasText = page.textLayerPresent === 'true';
-  const routingDecision = hasText ? 'ocr_then_llm' : 'vlm_direct';
+  const routingDecision = hasText ? 'ocr_llm' : 'vlm_direct';
 
   // Update classification
   await db.update(documentPages).set({
@@ -41,7 +41,7 @@ export async function processPageClassification(job: Job<PageClassificationPaylo
   }).where(eq(documentPages.id, documentPageId));
 
   // Get workspace provider for the appropriate category
-  if (routingDecision === 'ocr_then_llm') {
+  if (routingDecision === 'ocr_llm') {
     // Find OCR provider
     const [ocrProvider] = await db
       .select()

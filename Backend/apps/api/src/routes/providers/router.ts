@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { authenticate } from '../../middleware/authenticate.js';
 import { authorize } from '../../middleware/authorize.js';
 import { validate } from '../../middleware/validate.js';
-import { createProviderSchema, updateProviderSchema, paginationSchema } from '@mcq-platform/shared-types';
+import { createProviderSchema, updateProviderSchema } from '@mcq-platform/shared-types';
 import * as handlers from './handlers.js';
 
 const router = Router();

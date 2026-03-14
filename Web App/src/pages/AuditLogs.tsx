@@ -4,11 +4,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Search, Download, ChevronLeft, ChevronRight, ScrollText } from "lucide-react";
-import { toast } from "sonner";
+import { Search, ChevronLeft, ChevronRight, ScrollText } from "lucide-react";
 import { EmptyState } from "@/components/EmptyState";
 import { SortableHeader, SortConfig, toggleSort, useSort } from "@/components/SortableHeader";
 import { useAuditLogs } from "@/hooks/use-api";
+import type { AuditLogItem } from "@/lib/api-types";
 
 const actionColors: Record<string, string> = {
   "document.upload": "bg-info/10 text-info",
@@ -31,10 +31,10 @@ const actionCategories: Record<string, string[]> = {
 
 const PAGE_SIZE = 6;
 
-const sortGetters: Record<string, (l: any) => string | number> = {
-  timestamp: (l) => l.timestamp,
-  actor: (l) => l.actor,
-  action: (l) => l.action,
+const sortGetters: Record<string, (log: AuditLogItem) => string | number> = {
+  timestamp: (log) => log.timestamp,
+  actor: (log) => log.actor,
+  action: (log) => log.action,
 };
 
 export default function AuditLogs() {
@@ -42,24 +42,27 @@ export default function AuditLogs() {
   const [category, setCategory] = useState("all");
   const [page, setPage] = useState(0);
   const [sort, setSort] = useState<SortConfig | null>(null);
-
   const { data: logsData } = useAuditLogs({ page: page + 1, limit: PAGE_SIZE });
-  const allLogs = logsData?.items ?? (Array.isArray(logsData) ? logsData : []);
 
   const filtered = useMemo(() => {
-    return allLogs.filter((log: any) => {
-      const matchesSearch = !search || [log.actor, log.resource, log.details, log.action].some((f: string) => (f || '').toLowerCase().includes(search.toLowerCase()));
-      const matchesCategory = category === "all" || (actionCategories[category]?.includes(log.action));
+    const allLogs = logsData?.items ?? [];
+    return allLogs.filter((log) => {
+      const matchesSearch =
+        !search ||
+        [log.actor, log.resource, log.details, log.action].some((field) =>
+          field.toLowerCase().includes(search.toLowerCase()),
+        );
+      const matchesCategory = category === "all" || actionCategories[category]?.includes(log.action);
       return matchesSearch && matchesCategory;
     });
-  }, [search, category, allLogs]);
+  }, [category, logsData?.items, search]);
 
   const sorted = useSort(filtered, sort, sortGetters);
   const totalPages = Math.ceil(sorted.length / PAGE_SIZE);
   const paginated = sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
-  const handleCategoryChange = (v: string) => { setCategory(v); setPage(0); };
-  const handleSearchChange = (v: string) => { setSearch(v); setPage(0); };
+  const handleCategoryChange = (value: string) => { setCategory(value); setPage(0); };
+  const handleSearchChange = (value: string) => { setSearch(value); setPage(0); };
   const handleSort = (key: string) => { setSort((prev) => toggleSort(prev, key)); setPage(0); };
 
   return (
@@ -69,13 +72,12 @@ export default function AuditLogs() {
           <h1 className="text-2xl font-bold tracking-tight">Audit Logs</h1>
           <p className="text-sm text-muted-foreground mt-1">System activity and change history</p>
         </div>
-        <Button variant="outline" size="sm" className="gap-2" onClick={() => toast.success("Logs exported")}><Download className="h-3.5 w-3.5" /> Export Logs</Button>
       </div>
 
       <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
         <div className="relative flex-1 max-w-sm w-full">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-          <Input placeholder="Search logs..." className="pl-9 h-9 text-sm" value={search} onChange={(e) => handleSearchChange(e.target.value)} />
+          <Input placeholder="Search logs..." className="pl-9 h-9 text-sm" value={search} onChange={(event) => handleSearchChange(event.target.value)} />
         </div>
         <Tabs value={category} onValueChange={handleCategoryChange}>
           <TabsList className="h-9">

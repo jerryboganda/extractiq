@@ -7,6 +7,7 @@ interface SparklineChartProps {
 }
 
 export function SparklineChart({ data, color = "hsl(var(--primary))", height = 32 }: SparklineChartProps) {
+  if (!data || data.length === 0) return null;
   const chartData = data.map((value, i) => ({ v: value, i }));
   const id = `sparkline-${Math.random().toString(36).slice(2, 8)}`;
 

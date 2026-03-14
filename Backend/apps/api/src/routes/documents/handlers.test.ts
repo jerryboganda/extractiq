@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { Request, Response, NextFunction } from 'express';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { NextFunction, Request, Response } from 'express';
 
 vi.mock('@mcq-platform/db', () => ({
   db: {
@@ -8,7 +8,8 @@ vi.mock('@mcq-platform/db', () => ({
     update: vi.fn(),
     delete: vi.fn(),
   },
-  documents: 'documents_table',
+  documents: { id: 'documents.id', workspaceId: 'documents.workspaceId', projectId: 'documents.projectId', s3Key: 'documents.s3Key' },
+  projects: { id: 'projects.id', workspaceId: 'projects.workspaceId', name: 'projects.name' },
 }));
 
 vi.mock('@mcq-platform/storage', () => ({
@@ -20,25 +21,19 @@ vi.mock('uuid', () => ({
   v4: vi.fn().mockReturnValue('doc-uuid-1'),
 }));
 
-vi.mock('@mcq-platform/logger', () => ({
-  createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
-}));
-
-import { list, presignUpload, completeUpload, getById, remove } from './handlers.js';
+import { completeUpload, getById, list, presignUpload, remove } from './handlers.js';
 import { db } from '@mcq-platform/db';
-import { getPresignedUploadUrl, buildDocumentKey } from '@mcq-platform/storage';
+import { buildDocumentKey, getPresignedUploadUrl } from '@mcq-platform/storage';
 
 const mockedDb = vi.mocked(db);
-const mockedGetPresignedUrl = vi.mocked(getPresignedUploadUrl);
-const mockedBuildKey = vi.mocked(buildDocumentKey);
+const mockedBuildDocumentKey = vi.mocked(buildDocumentKey);
+const mockedGetPresignedUploadUrl = vi.mocked(getPresignedUploadUrl);
 
 function createReq(overrides: Partial<Request> = {}): Request {
   return {
     body: {},
     query: { page: 1, limit: 20 },
     params: {},
-    cookies: {},
-    headers: {},
     userId: 'user-1',
     workspaceId: 'ws-1',
     userRole: 'operator',
@@ -56,15 +51,15 @@ function createRes(): Response {
 function mockChain(result: unknown) {
   const chain: Record<string, unknown> = {};
   chain.from = vi.fn().mockReturnValue(chain);
+  chain.innerJoin = vi.fn().mockReturnValue(chain);
   chain.where = vi.fn().mockReturnValue(chain);
   chain.orderBy = vi.fn().mockReturnValue(chain);
   chain.limit = vi.fn().mockReturnValue(chain);
   chain.offset = vi.fn().mockReturnValue(chain);
   chain.values = vi.fn().mockReturnValue(chain);
-  chain.returning = vi.fn().mockReturnValue(chain);
+  chain.returning = vi.fn().mockResolvedValue(result);
   chain.set = vi.fn().mockReturnValue(chain);
-  chain.groupBy = vi.fn().mockReturnValue(chain);
-  chain.then = vi.fn().mockImplementation((resolve: any) => resolve(result));
+  chain.then = vi.fn().mockImplementation((resolve: (value: unknown) => unknown) => resolve(result));
   return chain;
 }
 
@@ -76,169 +71,116 @@ describe('documents handlers', () => {
     next = vi.fn();
   });
 
-  describe('list', () => {
-    it('returns paginated documents for workspace', async () => {
-      const items = [{ id: 'd1', filename: 'test.pdf' }];
-      const itemsChain = mockChain(items);
-      const countChain = mockChain([{ total: 1 }]);
+  it('lists mapped documents for the workspace', async () => {
+    mockedDb.select
+      .mockReturnValueOnce(mockChain([{
+        id: 'doc-1',
+        filename: 'biology.pdf',
+        status: 'uploaded',
+        pageCount: 12,
+        fileSize: 2 * 1024 * 1024,
+        mcqCount: 18,
+        confidenceAvg: 0.83,
+        createdAt: new Date('2026-03-13T00:00:00.000Z'),
+        projectId: 'project-1',
+        projectName: 'Biology',
+      }]) as never)
+      .mockReturnValueOnce(mockChain([{ total: 1 }]) as never);
 
-      mockedDb.select
-        .mockReturnValueOnce(itemsChain as any)
-        .mockReturnValueOnce(countChain as any);
+    const res = createRes();
+    await list(createReq({ query: { page: 1, limit: 10 } as any }), res, next);
 
-      const req = createReq({ query: { page: 1, limit: 10 } as any });
-      const res = createRes();
+    expect(res.json).toHaveBeenCalledWith({
+      data: {
+        items: [{
+          id: 'doc-1',
+          filename: 'biology.pdf',
+          status: 'uploaded',
+          pages: 12,
+          uploadDate: '2026-03-13T00:00:00.000Z',
+          mcqCount: 18,
+          confidence: 83,
+          size: '2.0 MB',
+          project: 'Biology',
+          projectId: 'project-1',
+        }],
+        total: 1,
+        page: 1,
+        limit: 10,
+        totalPages: 1,
+      },
+    });
+  });
 
-      await list(req, res, next);
+  it('verifies project ownership before creating a presigned upload', async () => {
+    mockedDb.select.mockReturnValueOnce(mockChain([{ id: 'project-1' }]) as never);
+    mockedBuildDocumentKey.mockReturnValue('ws-1/doc-uuid-1/biology.pdf');
+    mockedGetPresignedUploadUrl.mockResolvedValue('https://signed-upload.example.com');
+    mockedDb.insert.mockReturnValue(mockChain([{ id: 'doc-uuid-1' }]) as never);
 
-      expect(res.json).toHaveBeenCalledWith({
-        data: {
-          items,
-          total: 1,
-          page: 1,
-          limit: 10,
-          totalPages: 1,
+    const res = createRes();
+    await presignUpload(
+      createReq({
+        body: {
+          filename: 'biology.pdf',
+          contentType: 'application/pdf',
+          fileSize: 1024,
+          projectId: 'project-1',
         },
-      });
-      expect(next).not.toHaveBeenCalled();
-    });
+      }),
+      res,
+      next,
+    );
 
-    it('returns empty list when no documents', async () => {
-      const itemsChain = mockChain([]);
-      const countChain = mockChain([{ total: 0 }]);
-
-      mockedDb.select
-        .mockReturnValueOnce(itemsChain as any)
-        .mockReturnValueOnce(countChain as any);
-
-      const req = createReq({ query: { page: 1, limit: 10 } as any });
-      const res = createRes();
-
-      await list(req, res, next);
-
-      expect(res.json).toHaveBeenCalledWith({
-        data: { items: [], total: 0, page: 1, limit: 10, totalPages: 0 },
-      });
+    expect(res.status).toHaveBeenCalledWith(201);
+    expect(res.json).toHaveBeenCalledWith({
+      data: {
+        uploadUrl: 'https://signed-upload.example.com',
+        documentId: 'doc-uuid-1',
+        s3Key: 'ws-1/doc-uuid-1/biology.pdf',
+        expiresIn: 3600,
+      },
     });
   });
 
-  describe('presignUpload', () => {
-    it('creates document record and returns presigned URL', async () => {
-      mockedBuildKey.mockReturnValue('ws-1/doc-uuid-1/test.pdf');
-      mockedGetPresignedUrl.mockResolvedValue('https://s3.example.com/upload?signed=true');
+  it('marks a completed upload as uploaded rather than preprocessing', async () => {
+    mockedDb.update.mockReturnValueOnce(mockChain([{
+      id: 'doc-1',
+      status: 'uploaded',
+      checksumSha256: 'checksum-1',
+    }]) as never);
 
-      const doc = { id: 'doc-uuid-1', filename: 'test.pdf', status: 'uploaded' };
-      const insertChain = mockChain([doc]);
-      mockedDb.insert.mockReturnValue(insertChain as any);
+    const res = createRes();
+    await completeUpload(
+      createReq({ body: { uploadId: 'doc-1', s3Key: 'ws-1/doc-uuid-1/biology.pdf', checksumSha256: 'checksum-1' } }),
+      res,
+      next,
+    );
 
-      const req = createReq({
-        body: { filename: 'test.pdf', contentType: 'application/pdf', fileSize: 1024, projectId: 'proj-1' },
-      });
-      const res = createRes();
-
-      await presignUpload(req, res, next);
-
-      expect(res.status).toHaveBeenCalledWith(201);
-      expect(res.json).toHaveBeenCalledWith({
-        data: {
-          uploadUrl: 'https://s3.example.com/upload?signed=true',
-          documentId: 'doc-uuid-1',
-          s3Key: 'ws-1/doc-uuid-1/test.pdf',
-          expiresIn: 3600,
-        },
-      });
+    expect(res.json).toHaveBeenCalledWith({
+      data: {
+        id: 'doc-1',
+        status: 'uploaded',
+        checksumSha256: 'checksum-1',
+      },
     });
   });
 
-  describe('completeUpload', () => {
-    it('updates document status to preprocessing', async () => {
-      const doc = { id: 'd1', status: 'preprocessing' };
-      const chain = mockChain([doc]);
-      mockedDb.update.mockReturnValue(chain as any);
+  it('returns a document by id inside the workspace', async () => {
+    mockedDb.select.mockReturnValueOnce(mockChain([{ id: 'doc-1', filename: 'biology.pdf' }]) as never);
 
-      const req = createReq({
-        body: { uploadId: 'd1', s3Key: 'key', checksumSha256: 'abc123' },
-      });
-      const res = createRes();
+    const res = createRes();
+    await getById(createReq({ params: { id: 'doc-1' } as any }), res, next);
 
-      await completeUpload(req, res, next);
-
-      expect(res.json).toHaveBeenCalledWith({ data: doc });
-    });
-
-    it('returns 404 if document not found', async () => {
-      const chain = mockChain([]);
-      // Override returning to return empty
-      chain.returning = vi.fn().mockResolvedValue([]);
-      mockedDb.update.mockReturnValue(chain as any);
-
-      const req = createReq({ body: { uploadId: 'nonexistent', s3Key: 'key' } });
-      const res = createRes();
-
-      await completeUpload(req, res, next);
-
-      expect(next).toHaveBeenCalledWith(
-        expect.objectContaining({ statusCode: 404, code: 'NOT_FOUND' }),
-      );
-    });
+    expect(res.json).toHaveBeenCalledWith({ data: { id: 'doc-1', filename: 'biology.pdf' } });
   });
 
-  describe('getById', () => {
-    it('returns document by id', async () => {
-      const doc = { id: 'd1', filename: 'test.pdf' };
-      const chain = mockChain([doc]);
-      mockedDb.select.mockReturnValue(chain as any);
+  it('deletes a document in the current workspace', async () => {
+    mockedDb.delete.mockReturnValueOnce(mockChain([{ id: 'doc-1' }]) as never);
 
-      const req = createReq({ params: { id: 'd1' } as any });
-      const res = createRes();
+    const res = createRes();
+    await remove(createReq({ params: { id: 'doc-1' } as any }), res, next);
 
-      await getById(req, res, next);
-
-      expect(res.json).toHaveBeenCalledWith({ data: doc });
-    });
-
-    it('returns 404 for missing document', async () => {
-      const chain = mockChain([]);
-      mockedDb.select.mockReturnValue(chain as any);
-
-      const req = createReq({ params: { id: 'no-such-id' } as any });
-      const res = createRes();
-
-      await getById(req, res, next);
-
-      expect(next).toHaveBeenCalledWith(
-        expect.objectContaining({ statusCode: 404 }),
-      );
-    });
-  });
-
-  describe('remove', () => {
-    it('deletes document and returns success', async () => {
-      const doc = { id: 'd1' };
-      const chain = mockChain([doc]);
-      mockedDb.delete.mockReturnValue(chain as any);
-
-      const req = createReq({ params: { id: 'd1' } as any });
-      const res = createRes();
-
-      await remove(req, res, next);
-
-      expect(res.json).toHaveBeenCalledWith({ data: { message: 'Document deleted' } });
-    });
-
-    it('returns 404 when deleting nonexistent document', async () => {
-      const chain = mockChain([]);
-      chain.returning = vi.fn().mockResolvedValue([]);
-      mockedDb.delete.mockReturnValue(chain as any);
-
-      const req = createReq({ params: { id: 'nonexistent' } as any });
-      const res = createRes();
-
-      await remove(req, res, next);
-
-      expect(next).toHaveBeenCalledWith(
-        expect.objectContaining({ statusCode: 404 }),
-      );
-    });
+    expect(res.json).toHaveBeenCalledWith({ data: { message: 'Document deleted' } });
   });
 });

@@ -18,6 +18,7 @@ const envSchema = z.object({
   API_PORT: z.coerce.number().default(4000),
   API_HOST: z.string().default('0.0.0.0'),
   CORS_ORIGIN: z.string().default('http://localhost:8080'),
+  APP_BASE_URL: z.string().default('http://localhost:8080/app'),
 
   // Database
   DATABASE_URL: z.string().min(1),
@@ -29,6 +30,7 @@ const envSchema = z.object({
 
   // MinIO / S3
   S3_ENDPOINT: z.string().default('http://localhost:9000'),
+  S3_PUBLIC_ENDPOINT: z.string().default('http://localhost:9000'),
   S3_ACCESS_KEY: z.string().min(1, 'S3_ACCESS_KEY is required'),
   S3_SECRET_KEY: z.string().min(1, 'S3_SECRET_KEY is required'),
   S3_BUCKET: z.string().default('mcq-platform'),
@@ -55,6 +57,18 @@ const envSchema = z.object({
   QWEN_VL_API_KEY: z.string().optional().default(''),
   GLM_OCR_ENDPOINT: z.string().optional().default(''),
   GLM_OCR_API_KEY: z.string().optional().default(''),
+
+  // Email
+  SMTP_HOST: z.string().default('127.0.0.1'),
+  SMTP_PORT: z.coerce.number().default(1025),
+  SMTP_USER: z.string().optional().default(''),
+  SMTP_PASS: z.string().optional().default(''),
+  SMTP_SECURE: z.string().default('false').transform((v) => v === 'true'),
+  SMTP_FROM_NAME: z.string().default('ExtractIQ Document Intelligence'),
+  SMTP_FROM: z.string().email().default('noreply@extractiq.local'),
+  SALES_NOTIFICATION_EMAIL: z.string().email().default('sales@extractiq.local'),
+  SUPPORT_NOTIFICATION_EMAIL: z.string().email().default('support@extractiq.local'),
+  ENABLE_EMAIL_DELIVERY: z.string().default('true').transform((v) => v === 'true'),
 
   // Rate Limiting
   RATE_LIMIT_AUTH_MAX: z.coerce.number().default(5),

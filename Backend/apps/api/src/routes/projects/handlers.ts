@@ -1,5 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
-import { eq, and, count, desc, sql } from 'drizzle-orm';
+import { eq, and, count, desc } from 'drizzle-orm';
 import { db, projects, documents, mcqRecords } from '@mcq-platform/db';
 import { AppError } from '../../middleware/error-handler.js';
 

@@ -12,6 +12,7 @@ import { WelcomeBanner } from "@/components/dashboard/WelcomeBanner";
 import { SystemIntelligenceBar } from "@/components/dashboard/SystemIntelligenceBar";
 import { useDashboardStats, useDashboardSparklines } from "@/hooks/use-api";
 import { StaggerContainer, StaggerItem } from "@/components/StaggerContainer";
+import { useAuth } from "@/contexts/AuthContext";
 
 const quickActions = [
   { label: "Upload Documents", icon: Upload, href: "/upload" },
@@ -21,6 +22,7 @@ const quickActions = [
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { data: stats, isLoading: statsLoading } = useDashboardStats();
   const { data: sparklines } = useDashboardSparklines();
 
@@ -33,7 +35,7 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <WelcomeBanner />
+      <WelcomeBanner userName={user?.name ?? null} stats={stats} />
 
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div>
@@ -61,7 +63,7 @@ export default function Dashboard() {
         }
       </StaggerContainer>
 
-      <SystemIntelligenceBar />
+      <SystemIntelligenceBar stats={stats} />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <ActiveJobsPanel />

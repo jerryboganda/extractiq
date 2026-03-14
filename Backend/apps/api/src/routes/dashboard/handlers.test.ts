@@ -1,132 +1,160 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { Request, Response, NextFunction } from 'express';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { NextFunction, Request, Response } from 'express';
 
 vi.mock('@mcq-platform/db', () => ({
   db: { select: vi.fn() },
-  documents: 'documents_table',
-  mcqRecords: 'mcq_records_table',
-  jobs: 'jobs_table',
-  providerConfigs: 'provider_configs_table',
-  providerBenchmarks: 'provider_benchmarks_table',
-  auditLogs: 'audit_logs_table',
+  documents: { workspaceId: 'documents.workspaceId', id: 'documents.id', filename: 'documents.filename', createdAt: 'documents.createdAt' },
+  mcqRecords: { workspaceId: 'mcq.workspaceId', reviewStatus: 'mcq.reviewStatus', createdAt: 'mcq.createdAt' },
+  jobs: { workspaceId: 'jobs.workspaceId', status: 'jobs.status', id: 'jobs.id', createdAt: 'jobs.createdAt' },
+  providerConfigs: { workspaceId: 'provider.workspaceId', isEnabled: 'provider.isEnabled', id: 'provider.id' },
+  providerBenchmarks: { providerConfigId: 'bench.providerConfigId', measuredAt: 'bench.measuredAt' },
+  auditLogs: { workspaceId: 'audit.workspaceId', createdAt: 'audit.createdAt' },
+  jobDocuments: { jobId: 'jobDocuments.jobId', documentId: 'jobDocuments.documentId' },
+  jobTasks: { jobId: 'jobTasks.jobId', createdAt: 'jobTasks.createdAt', taskType: 'jobTasks.taskType' },
 }));
 
-vi.mock('@mcq-platform/logger', () => ({
-  createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
-}));
-
-import { getStats, getActiveJobs, getRecentActivity, getProviderHealth } from './handlers.js';
+import { getActiveJobs, getProviderHealth, getRecentActivity, getStats } from './handlers.js';
 import { db } from '@mcq-platform/db';
 
 const mockedDb = vi.mocked(db);
 
 function createReq(overrides: Partial<Request> = {}): Request {
-  return { body: {}, query: {}, params: {}, cookies: {}, headers: {}, userId: 'user-1', workspaceId: 'ws-1', userRole: 'operator', ...overrides } as unknown as Request;
+  return {
+    workspaceId: 'ws-1',
+    userId: 'user-1',
+    userRole: 'operator',
+    ...overrides,
+  } as unknown as Request;
 }
 
 function createRes(): Response {
-  return { status: vi.fn().mockReturnThis(), json: vi.fn().mockReturnThis() } as unknown as Response;
+  return {
+    status: vi.fn().mockReturnThis(),
+    json: vi.fn().mockReturnThis(),
+  } as unknown as Response;
 }
 
-function mockCountChain(count: number) {
+function mockChain(result: unknown) {
   const chain: Record<string, unknown> = {};
   chain.from = vi.fn().mockReturnValue(chain);
   chain.where = vi.fn().mockReturnValue(chain);
+  chain.innerJoin = vi.fn().mockReturnValue(chain);
+  chain.orderBy = vi.fn().mockReturnValue(chain);
   chain.limit = vi.fn().mockReturnValue(chain);
-  chain.then = vi.fn().mockImplementation((resolve: any) => resolve([{ count }]));
+  chain.then = vi.fn().mockImplementation((resolve: (value: unknown) => unknown) => resolve(result));
   return chain;
 }
 
 describe('dashboard handlers', () => {
   let next: NextFunction;
-  beforeEach(() => { vi.clearAllMocks(); next = vi.fn(); });
 
-  describe('getStats', () => {
-    it('returns document, mcq, approval, and active job counts', async () => {
-      mockedDb.select
-        .mockReturnValueOnce(mockCountChain(100) as any)   // docCount
-        .mockReturnValueOnce(mockCountChain(500) as any)   // mcqCount
-        .mockReturnValueOnce(mockCountChain(400) as any)   // approvedCount
-        .mockReturnValueOnce(mockCountChain(3) as any);    // activeJobCount
+  beforeEach(() => {
+    vi.clearAllMocks();
+    next = vi.fn();
+  });
 
-      const req = createReq();
-      const res = createRes();
-      await getStats(req, res, next);
+  it('returns normalized dashboard stats', async () => {
+    mockedDb.select
+      .mockReturnValueOnce(mockChain([{ count: 100 }]) as never)
+      .mockReturnValueOnce(mockChain([{ count: 500 }]) as never)
+      .mockReturnValueOnce(mockChain([{ count: 400 }]) as never)
+      .mockReturnValueOnce(mockChain([{ count: 3 }]) as never);
 
-      const data = (res.json as any).mock.calls[0][0].data;
-      expect(data.documentsProcessed).toBe(100);
-      expect(data.mcqsExtracted).toBe(500);
-      expect(data.approvalRate).toBe(80);
-      expect(data.activeJobs).toBe(3);
-    });
+    const res = createRes();
+    await getStats(createReq(), res, next);
 
-    it('returns 0 approval rate when no MCQs', async () => {
-      mockedDb.select
-        .mockReturnValueOnce(mockCountChain(0) as any)
-        .mockReturnValueOnce(mockCountChain(0) as any)
-        .mockReturnValueOnce(mockCountChain(0) as any)
-        .mockReturnValueOnce(mockCountChain(0) as any);
-
-      const req = createReq();
-      const res = createRes();
-      await getStats(req, res, next);
-
-      expect((res.json as any).mock.calls[0][0].data.approvalRate).toBe(0);
+    expect(res.json).toHaveBeenCalledWith({
+      data: {
+        documentsProcessed: 100,
+        mcqsExtracted: 500,
+        approvalRate: 80,
+        activeJobs: 3,
+        documentsProcessedTrend: 0,
+        mcqsExtractedTrend: 0,
+        approvalRateTrend: 0,
+        activeJobsTrend: 0,
+      },
     });
   });
 
-  describe('getActiveJobs', () => {
-    it('returns active jobs list', async () => {
-      const jobs = [{ id: 'j1', status: 'processing', progressPercent: 50 }];
-      const chain: Record<string, unknown> = {};
-      chain.from = vi.fn().mockReturnValue(chain);
-      chain.where = vi.fn().mockReturnValue(chain);
-      chain.orderBy = vi.fn().mockReturnValue(chain);
-      chain.limit = vi.fn().mockReturnValue(chain);
-      chain.then = vi.fn().mockImplementation((resolve: any) => resolve(jobs));
-      mockedDb.select.mockReturnValue(chain as any);
+  it('maps active jobs into dashboard card shape', async () => {
+    mockedDb.select
+      .mockReturnValueOnce(mockChain([{
+        id: 'job-1',
+        status: 'preprocessing',
+        progressPercent: 42.2,
+        startedAt: new Date('2026-03-13T01:00:00.000Z'),
+        createdAt: new Date('2026-03-13T00:00:00.000Z'),
+      }]) as never)
+      .mockReturnValueOnce(mockChain([{ filename: 'biology.pdf' }]) as never)
+      .mockReturnValueOnce(mockChain([{ taskType: 'vlm_extraction' }]) as never);
 
-      const req = createReq();
-      const res = createRes();
-      await getActiveJobs(req, res, next);
+    const res = createRes();
+    await getActiveJobs(createReq(), res, next);
 
-      expect(res.json).toHaveBeenCalledWith({ data: jobs });
+    expect(res.json).toHaveBeenCalledWith({
+      data: [{
+        id: 'job-1',
+        document: 'biology.pdf',
+        status: 'preprocessing',
+        progress: 42,
+        provider: 'vlm pipeline',
+        stage: 'vlm_extraction',
+        startedAt: '2026-03-13T01:00:00.000Z',
+      }],
     });
   });
 
-  describe('getRecentActivity', () => {
-    it('returns audit log entries', async () => {
-      const logs = [{ id: 'log1', action: 'document.upload' }];
-      const chain: Record<string, unknown> = {};
-      chain.from = vi.fn().mockReturnValue(chain);
-      chain.where = vi.fn().mockReturnValue(chain);
-      chain.orderBy = vi.fn().mockReturnValue(chain);
-      chain.limit = vi.fn().mockReturnValue(chain);
-      chain.then = vi.fn().mockImplementation((resolve: any) => resolve(logs));
-      mockedDb.select.mockReturnValue(chain as any);
+  it('maps recent activity into feed rows', async () => {
+    mockedDb.select.mockReturnValueOnce(mockChain([{
+      id: 'audit-1',
+      action: 'document.uploaded',
+      resourceType: 'document',
+      resourceId: 'doc-1',
+      userId: 'user-1',
+      details: {},
+      createdAt: new Date('2026-03-13T00:00:00.000Z'),
+    }]) as never);
 
-      const req = createReq();
-      const res = createRes();
-      await getRecentActivity(req, res, next);
+    const res = createRes();
+    await getRecentActivity(createReq(), res, next);
 
-      expect(res.json).toHaveBeenCalledWith({ data: logs });
+    expect(res.json).toHaveBeenCalledWith({
+      data: [{
+        id: 'audit-1',
+        action: 'document.uploaded',
+        target: 'document doc-1',
+        user: 'user-1',
+        time: '2026-03-13T00:00:00.000Z',
+        type: 'upload',
+      }],
     });
   });
 
-  describe('getProviderHealth', () => {
-    it('returns enabled providers health status', async () => {
-      const providers = [{ id: 'p1', displayName: 'OpenAI', healthStatus: 'healthy' }];
-      const chain: Record<string, unknown> = {};
-      chain.from = vi.fn().mockReturnValue(chain);
-      chain.where = vi.fn().mockReturnValue(chain);
-      chain.then = vi.fn().mockImplementation((resolve: any) => resolve(providers));
-      mockedDb.select.mockReturnValue(chain as any);
+  it('returns provider health cards with benchmark data', async () => {
+    mockedDb.select
+      .mockReturnValueOnce(mockChain([{
+        id: 'provider-1',
+        displayName: 'OpenAI OCR',
+        healthStatus: 'offline',
+        lastHealthCheck: new Date('2026-03-13T00:00:00.000Z'),
+      }]) as never)
+      .mockReturnValueOnce(mockChain([{
+        accuracy: 0.97,
+        avgLatencyMs: 512.3,
+      }]) as never);
 
-      const req = createReq();
-      const res = createRes();
-      await getProviderHealth(req, res, next);
+    const res = createRes();
+    await getProviderHealth(createReq(), res, next);
 
-      expect(res.json).toHaveBeenCalledWith({ data: providers });
+    expect(res.json).toHaveBeenCalledWith({
+      data: [{
+        name: 'OpenAI OCR',
+        status: 'offline',
+        accuracy: 97,
+        latency: '512ms',
+        lastHealthCheck: '2026-03-13T00:00:00.000Z',
+      }],
     });
   });
 });

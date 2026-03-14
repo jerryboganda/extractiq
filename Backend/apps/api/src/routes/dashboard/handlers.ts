@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
-import { eq, and, count, sql, avg, gte, desc } from 'drizzle-orm';
-import { db, documents, mcqRecords, jobs, providerConfigs, providerBenchmarks, auditLogs } from '@mcq-platform/db';
+import { eq, and, count, sql, gte, desc } from 'drizzle-orm';
+import { db, documents, mcqRecords, jobs, providerConfigs, providerBenchmarks, auditLogs, jobDocuments, jobTasks } from '@mcq-platform/db';
 
 export async function getStats(req: Request, res: Response, next: NextFunction) {
   try {
@@ -26,7 +26,7 @@ export async function getStats(req: Request, res: Response, next: NextFunction) 
       .from(jobs)
       .where(and(
         eq(jobs.workspaceId, wid),
-        sql`${jobs.status} IN ('pending', 'queued', 'processing', 'extracting')`,
+        sql`${jobs.status} IN ('queued', 'preprocessing', 'ocr_processing', 'vlm_processing', 'extracting', 'validating', 'review_required')`,
       ));
 
     const approvalRate = mcqCount.count > 0
@@ -113,12 +113,38 @@ export async function getActiveJobs(req: Request, res: Response, next: NextFunct
       .from(jobs)
       .where(and(
         eq(jobs.workspaceId, req.workspaceId),
-        sql`${jobs.status} IN ('pending', 'queued', 'processing', 'extracting')`,
+        sql`${jobs.status} IN ('queued', 'preprocessing', 'ocr_processing', 'vlm_processing', 'extracting', 'validating', 'review_required')`,
       ))
       .orderBy(desc(jobs.createdAt))
       .limit(10);
 
-    res.json({ data: activeJobs });
+    res.json({
+      data: await Promise.all(activeJobs.map(async (job) => {
+        const [linkedDocument] = await db
+          .select({ filename: documents.filename })
+          .from(jobDocuments)
+          .innerJoin(documents, eq(documents.id, jobDocuments.documentId))
+          .where(eq(jobDocuments.jobId, job.id))
+          .limit(1);
+
+        const [latestTask] = await db
+          .select({ taskType: jobTasks.taskType })
+          .from(jobTasks)
+          .where(eq(jobTasks.jobId, job.id))
+          .orderBy(desc(jobTasks.createdAt))
+          .limit(1);
+
+        return {
+          id: job.id,
+          document: linkedDocument?.filename ?? `Job ${job.id.slice(0, 8)}`,
+          status: job.status,
+          progress: Math.round(job.progressPercent),
+          provider: latestTask?.taskType?.includes('vlm') ? 'vlm pipeline' : 'ocr pipeline',
+          stage: latestTask?.taskType ?? job.status,
+          startedAt: job.startedAt?.toISOString() ?? job.createdAt.toISOString(),
+        };
+      })),
+    });
   } catch (err) {
     next(err);
   }
@@ -141,7 +167,20 @@ export async function getRecentActivity(req: Request, res: Response, next: NextF
       .orderBy(desc(auditLogs.createdAt))
       .limit(20);
 
-    res.json({ data: logs });
+    res.json({
+      data: logs.map((log) => ({
+        id: log.id,
+        action: log.action,
+        target: `${log.resourceType}${log.resourceId ? ` ${log.resourceId}` : ''}`,
+        user: log.userId ?? 'system',
+        time: log.createdAt.toISOString(),
+        type: log.action.includes('document') ? 'upload'
+          : log.action.includes('approve') ? 'approve'
+          : log.action.includes('export') ? 'export'
+          : log.action.includes('provider') ? 'settings'
+          : 'extract',
+      })),
+    });
   } catch (err) {
     next(err);
   }
@@ -153,16 +192,33 @@ export async function getProviderHealth(req: Request, res: Response, next: NextF
       .select({
         id: providerConfigs.id,
         displayName: providerConfigs.displayName,
-        providerType: providerConfigs.providerType,
-        category: providerConfigs.category,
         healthStatus: providerConfigs.healthStatus,
-        isEnabled: providerConfigs.isEnabled,
         lastHealthCheck: providerConfigs.lastHealthCheck,
       })
       .from(providerConfigs)
       .where(and(eq(providerConfigs.workspaceId, req.workspaceId), eq(providerConfigs.isEnabled, true)));
 
-    res.json({ data: providers });
+    res.json({
+      data: await Promise.all(providers.map(async (provider) => {
+        const [benchmark] = await db
+          .select({
+            accuracy: providerBenchmarks.accuracy,
+            avgLatencyMs: providerBenchmarks.avgLatencyMs,
+          })
+          .from(providerBenchmarks)
+          .where(eq(providerBenchmarks.providerConfigId, provider.id))
+          .orderBy(desc(providerBenchmarks.measuredAt))
+          .limit(1);
+
+        return {
+          name: provider.displayName,
+          status: provider.healthStatus === 'offline' ? 'offline' : provider.healthStatus,
+          accuracy: Math.round((benchmark?.accuracy ?? 0) * 100),
+          latency: benchmark?.avgLatencyMs ? `${Math.round(benchmark.avgLatencyMs)}ms` : 'n/a',
+          lastHealthCheck: provider.lastHealthCheck?.toISOString() ?? null,
+        };
+      })),
+    });
   } catch (err) {
     next(err);
   }

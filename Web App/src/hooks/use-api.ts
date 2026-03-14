@@ -1,648 +1,833 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api } from '@/lib/api-client';
-import { toast } from 'sonner';
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { api } from "@/lib/api-client";
+import type {
+  ActiveJobItem,
+  ActivityItem,
+  AnalyticsSummary,
+  AnalyticsTimeSeriesPoint,
+  ApiEnvelope,
+  AuditLogItem,
+  AuthUser,
+  ConfidenceDistributionBucket,
+  CostBreakdownPoint,
+  DashboardSparkline,
+  DashboardStats,
+  DocumentListItem,
+  ExportDownloadData,
+  ExportJobItem,
+  InvitationDetail,
+  JobListItem,
+  McqOption,
+  McqRecordItem,
+  NotificationItem,
+  PaginatedData,
+  ProcessingTimePoint,
+  ProjectListItem,
+  ProviderComparisonPoint,
+  ProviderHealthItem,
+  ProviderItem,
+  ProviderTestResult,
+  ReviewDetail,
+  ReviewNavigation,
+  ReviewQueueItem,
+  SearchResultItem,
+  UserItem,
+  WorkspaceData,
+  WorkspaceUsage,
+  PresignedUploadData,
+} from "@/lib/api-types";
 
-// ──────────────────────────────────────────
+type IdentifierPayload = { id: string } & Record<string, unknown>;
+
+interface RawMcqRecord {
+  id: string;
+  questionText: string;
+  options: McqOption[] | null;
+  correctAnswer?: string | null;
+  explanation?: string | null;
+  confidence?: number | null;
+  difficulty?: string | null;
+  flags?: string[] | null;
+  sourcePage?: number | null;
+  version?: number;
+}
+
+interface RawProvider {
+  id: string;
+  displayName: string;
+  providerType: string;
+  healthStatus: string;
+  models?: string[] | null;
+  accuracy?: number | null;
+  avgLatency?: string | null;
+  costPerRecord?: number | null;
+  errorRate?: number | null;
+  totalCost?: number | null;
+  category?: string;
+  isEnabled?: boolean;
+  isDefault?: boolean;
+}
+
+interface RawAnalyticsSummary {
+  totalMcqRecords?: number;
+  averageConfidence?: number;
+  totalCostUsd?: number;
+}
+
+interface RawWorkspace {
+  id: string;
+  name: string;
+  slug: string;
+  plan: string;
+  settings?: Record<string, unknown>;
+  maxFileSizeMb: number;
+  autoApproveThreshold?: number | null;
+}
+
+interface RawAuditLog {
+  id: string;
+  createdAt: string;
+  actor?: string;
+  action: string;
+  resourceType?: string;
+  resourceId?: string | null;
+  details?: Record<string, unknown> | string | null;
+}
+
+function mapRoleLabel(role: string) {
+  const labels: Record<string, string> = {
+    workspace_admin: "Admin",
+    reviewer: "Reviewer",
+    analyst: "Analyst",
+    operator: "Operator",
+    api_user: "API User",
+    super_admin: "Super Admin",
+  };
+
+  return labels[role] ?? role;
+}
+
+function getInitials(name: string) {
+  return name
+    .split(" ")
+    .filter(Boolean)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("")
+    .slice(0, 2);
+}
+
+function formatRelativeTime(value?: string | null) {
+  if (!value) return "Never";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString();
+}
+
+function mapMcqRecord(record: RawMcqRecord): McqRecordItem {
+  const options = Array.isArray(record.options) ? record.options : [];
+  const correct = options.findIndex((option) => option.label === record.correctAnswer);
+
+  return {
+    id: record.id,
+    question: record.questionText,
+    options: options.map((option) => option.text),
+    correct,
+    explanation: record.explanation ?? null,
+    confidence: Math.round((record.confidence ?? 0) * 100),
+    difficulty: (record.difficulty ?? "medium").replace(/^./, (value) => value.toUpperCase()),
+    tags: Array.isArray(record.flags) ? record.flags : [],
+    document: "",
+    page: record.sourcePage ?? 0,
+    version: record.version,
+  };
+}
+
+function mapProvider(provider: RawProvider): ProviderItem {
+  return {
+    id: provider.id,
+    name: provider.displayName,
+    provider: provider.providerType,
+    status: provider.healthStatus,
+    model: provider.models?.[0] ?? "n/a",
+    accuracy: Math.round((provider.accuracy ?? 0) * 100),
+    avgLatency: provider.avgLatency ?? "n/a",
+    costPerRecord: provider.costPerRecord ?? 0,
+    totalCost: provider.totalCost ?? 0,
+    errorRate: Math.round((provider.errorRate ?? 0) * 100),
+    category: provider.category,
+    isEnabled: provider.isEnabled,
+    isDefault: provider.isDefault,
+  };
+}
+
+function mapWorkspace(workspace: RawWorkspace): WorkspaceData {
+  const settings = workspace.settings ?? {};
+
+  return {
+    ...workspace,
+    settings,
+    description: typeof settings.description === "string" ? settings.description : "",
+    apiKey: typeof settings.apiKey === "string" ? settings.apiKey : "",
+  };
+}
+
+function mapAuditLog(log: RawAuditLog): AuditLogItem {
+  return {
+    id: log.id,
+    timestamp: log.createdAt,
+    actor: log.actor ?? "System",
+    action: log.action,
+    resource: [log.resourceType, log.resourceId].filter(Boolean).join(" "),
+    details: typeof log.details === "string" ? log.details : JSON.stringify(log.details ?? {}),
+    category: log.action.split(".")[0] ?? "system",
+  };
+}
+
 // Dashboard
-// ──────────────────────────────────────────
-
 export function useDashboardStats() {
   return useQuery({
-    queryKey: ['dashboard', 'stats'],
-    queryFn: () => api.get<{ data: any }>('/dashboard/stats'),
-    select: (res) => res.data,
+    queryKey: ["dashboard", "stats"],
+    queryFn: () => api.get<ApiEnvelope<DashboardStats>>("/dashboard/stats"),
+    select: (response) => response.data,
   });
 }
 
 export function useDashboardSparklines() {
   return useQuery({
-    queryKey: ['dashboard', 'sparklines'],
-    queryFn: () => api.get<{ data: any }>('/dashboard/sparklines'),
-    select: (res) => res.data,
+    queryKey: ["dashboard", "sparklines"],
+    queryFn: () => api.get<ApiEnvelope<DashboardSparkline>>("/dashboard/sparklines"),
+    select: (response) => response.data,
   });
 }
 
 export function useActiveJobs() {
   return useQuery({
-    queryKey: ['dashboard', 'active-jobs'],
-    queryFn: () => api.get<{ data: any[] }>('/dashboard/active-jobs'),
-    select: (res) => res.data,
+    queryKey: ["dashboard", "active-jobs"],
+    queryFn: () => api.get<ApiEnvelope<ActiveJobItem[]>>("/dashboard/active-jobs"),
+    select: (response) => response.data,
     refetchInterval: 5000,
   });
 }
 
 export function useRecentActivity() {
   return useQuery({
-    queryKey: ['dashboard', 'recent-activity'],
-    queryFn: () => api.get<{ data: any[] }>('/dashboard/recent-activity'),
-    select: (res) => res.data,
+    queryKey: ["dashboard", "recent-activity"],
+    queryFn: () => api.get<ApiEnvelope<ActivityItem[]>>("/dashboard/recent-activity"),
+    select: (response) => response.data,
   });
 }
 
 export function useProviderHealth() {
   return useQuery({
-    queryKey: ['dashboard', 'provider-health'],
-    queryFn: () => api.get<{ data: any[] }>('/dashboard/provider-health'),
-    select: (res) => res.data,
+    queryKey: ["dashboard", "provider-health"],
+    queryFn: () => api.get<ApiEnvelope<ProviderHealthItem[]>>("/dashboard/provider-health"),
+    select: (response) => response.data,
   });
 }
 
-// ──────────────────────────────────────────
-// Projects
-// ──────────────────────────────────────────
+export function useInvitation(token: string) {
+  return useQuery({
+    queryKey: ["auth", "invitation", token],
+    queryFn: () => api.get<ApiEnvelope<InvitationDetail>>(`/auth/invitations/${token}`),
+    select: (response) => response.data,
+    enabled: Boolean(token),
+    retry: false,
+  });
+}
 
+export function useAcceptInvitation() {
+  return useMutation({
+    mutationFn: (data: { token: string; name: string; password: string }) =>
+      api.post<ApiEnvelope<{ user: AuthUser; token: string }>>("/auth/accept-invitation", data),
+    onError: (error: Error) => toast.error(error.message),
+  });
+}
+
+// Projects
 export function useProjects(params?: { page?: number; limit?: number; search?: string }) {
-  const p = params || {};
   const query = new URLSearchParams();
-  if (p.page) query.set('page', String(p.page));
-  if (p.limit) query.set('limit', String(p.limit));
-  if (p.search) query.set('search', p.search);
+  if (params?.page) query.set("page", String(params.page));
+  if (params?.limit) query.set("limit", String(params.limit));
+  if (params?.search) query.set("search", params.search);
 
   return useQuery({
-    queryKey: ['projects', p],
-    queryFn: () => api.get<{ data: { items: any[]; total: number; page: number; limit: number; totalPages: number } }>(`/projects?${query}`),
-    select: (res) => res.data,
+    queryKey: ["projects", params ?? {}],
+    queryFn: () => api.get<ApiEnvelope<PaginatedData<ProjectListItem>>>(`/projects?${query}`),
+    select: (response) => ({
+      ...response.data,
+      items: response.data.items.map((project) => ({
+        ...project,
+        lastActivity: project.createdAt ? new Date(project.createdAt).toLocaleDateString() : "Recently updated",
+        progress: 100,
+        members: 1,
+      })),
+    }),
   });
 }
 
 export function useCreateProject() {
-  const qc = useQueryClient();
+  const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (data: { name: string; description?: string }) => api.post('/projects', data),
+    mutationFn: (data: { name: string; description?: string }) => api.post("/projects", data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['projects'] });
-      toast.success('Project created');
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+      toast.success("Project created");
     },
-    onError: (err: Error) => toast.error(err.message),
+    onError: (error: Error) => toast.error(error.message),
   });
 }
 
 export function useUpdateProject() {
-  const qc = useQueryClient();
+  const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...data }: { id: string; name?: string; description?: string; status?: string }) =>
-      api.patch(`/projects/${id}`, data),
+    mutationFn: ({ id, ...data }: IdentifierPayload) => api.patch(`/projects/${id}`, data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['projects'] });
-      toast.success('Project updated');
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+      toast.success("Project updated");
     },
-    onError: (err: Error) => toast.error(err.message),
+    onError: (error: Error) => toast.error(error.message),
   });
 }
 
 export function useDeleteProject() {
-  const qc = useQueryClient();
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.delete(`/projects/${id}`),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['projects'] });
-      toast.success('Project deleted');
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+      toast.success("Project deleted");
     },
-    onError: (err: Error) => toast.error(err.message),
+    onError: (error: Error) => toast.error(error.message),
   });
 }
 
-// ──────────────────────────────────────────
 // Documents
-// ──────────────────────────────────────────
-
 export function useDocuments(params?: { page?: number; limit?: number; status?: string; projectId?: string }) {
-  const p = params || {};
   const query = new URLSearchParams();
-  if (p.page) query.set('page', String(p.page));
-  if (p.limit) query.set('limit', String(p.limit));
-  if (p.status) query.set('status', p.status);
-  if (p.projectId) query.set('projectId', p.projectId);
+  if (params?.page) query.set("page", String(params.page));
+  if (params?.limit) query.set("limit", String(params.limit));
+  if (params?.status) query.set("status", params.status);
+  if (params?.projectId) query.set("projectId", params.projectId);
 
   return useQuery({
-    queryKey: ['documents', p],
-    queryFn: () => api.get<{ data: { items: any[]; total: number; page: number; limit: number; totalPages: number } }>(`/documents?${query}`),
-    select: (res) => res.data,
+    queryKey: ["documents", params ?? {}],
+    queryFn: () => api.get<ApiEnvelope<PaginatedData<DocumentListItem>>>(`/documents?${query}`),
+    select: (response) => response.data,
   });
 }
 
 export function usePresignUpload() {
   return useMutation({
     mutationFn: (data: { filename: string; contentType: string; fileSize: number; projectId: string }) =>
-      api.post<{ data: { uploadUrl: string; documentId: string; s3Key: string; expiresIn: number } }>('/documents/presign', data),
-    onError: (err: Error) => toast.error(err.message),
+      api.post<ApiEnvelope<PresignedUploadData>>("/documents/presign", data),
+    onError: (error: Error) => toast.error(error.message),
   });
 }
 
 export function useCompleteUpload() {
-  const qc = useQueryClient();
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: { uploadId: string; s3Key: string; checksumSha256?: string }) =>
-      api.post('/documents/complete', data),
+      api.post("/documents/complete", data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['documents'] });
-      toast.success('Upload completed');
+      queryClient.invalidateQueries({ queryKey: ["documents"] });
+      toast.success("Upload completed");
     },
-    onError: (err: Error) => toast.error(err.message),
+    onError: (error: Error) => toast.error(error.message),
   });
 }
 
 export function useDeleteDocument() {
-  const qc = useQueryClient();
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.delete(`/documents/${id}`),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['documents'] });
-      toast.success('Document deleted');
+      queryClient.invalidateQueries({ queryKey: ["documents"] });
+      toast.success("Document deleted");
     },
-    onError: (err: Error) => toast.error(err.message),
+    onError: (error: Error) => toast.error(error.message),
   });
 }
 
-// ──────────────────────────────────────────
 // Jobs
-// ──────────────────────────────────────────
-
 export function useJobs(params?: { page?: number; limit?: number; status?: string }) {
-  const p = params || {};
   const query = new URLSearchParams();
-  if (p.page) query.set('page', String(p.page));
-  if (p.limit) query.set('limit', String(p.limit));
-  if (p.status) query.set('status', p.status);
+  if (params?.page) query.set("page", String(params.page));
+  if (params?.limit) query.set("limit", String(params.limit));
+  if (params?.status) query.set("status", params.status);
 
   return useQuery({
-    queryKey: ['jobs', p],
-    queryFn: () => api.get<{ data: { items: any[]; total: number; page: number; limit: number; totalPages: number } }>(`/jobs?${query}`),
-    select: (res) => res.data,
+    queryKey: ["jobs", params ?? {}],
+    queryFn: () => api.get<ApiEnvelope<PaginatedData<JobListItem>>>(`/jobs?${query}`),
+    select: (response) => response.data,
   });
 }
 
 export function useJob(id: string) {
   return useQuery({
-    queryKey: ['jobs', id],
-    queryFn: () => api.get<{ data: any }>(`/jobs/${id}`),
-    select: (res) => res.data,
-    enabled: !!id,
+    queryKey: ["jobs", id],
+    queryFn: () => api.get<ApiEnvelope<JobListItem & { tasks?: unknown[] }>>(`/jobs/${id}`),
+    select: (response) => response.data,
+    enabled: Boolean(id),
   });
 }
 
 export function useCreateJob() {
-  const qc = useQueryClient();
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: { documentIds: string[]; projectId: string; extractionProfile?: Record<string, unknown> }) =>
-      api.post('/jobs', data),
+      api.post("/jobs", data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['jobs'] });
-      toast.success('Job created');
+      queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      queryClient.invalidateQueries({ queryKey: ["documents"] });
+      toast.success("Job created");
     },
-    onError: (err: Error) => toast.error(err.message),
+    onError: (error: Error) => toast.error(error.message),
   });
 }
 
 export function useCancelJob() {
-  const qc = useQueryClient();
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.post(`/jobs/${id}/cancel`),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['jobs'] });
-      toast.success('Job cancelled');
+      queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      toast.success("Job cancelled");
     },
-    onError: (err: Error) => toast.error(err.message),
+    onError: (error: Error) => toast.error(error.message),
   });
 }
 
 export function useRetryJob() {
-  const qc = useQueryClient();
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.post(`/jobs/${id}/retry`),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['jobs'] });
-      toast.success('Job retried');
+      queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      toast.success("Job retried");
     },
-    onError: (err: Error) => toast.error(err.message),
+    onError: (error: Error) => toast.error(error.message),
   });
 }
 
-// ──────────────────────────────────────────
 // MCQ Records
-// ──────────────────────────────────────────
-
 export function useMcqRecords(params?: { page?: number; limit?: number; status?: string; confidence?: string; projectId?: string }) {
-  const p = params || {};
   const query = new URLSearchParams();
-  if (p.page) query.set('page', String(p.page));
-  if (p.limit) query.set('limit', String(p.limit));
-  if (p.status) query.set('status', p.status);
-  if (p.confidence) query.set('confidence', p.confidence);
-  if (p.projectId) query.set('projectId', p.projectId);
+  if (params?.page) query.set("page", String(params.page));
+  if (params?.limit) query.set("limit", String(params.limit));
+  if (params?.status) query.set("status", params.status);
+  if (params?.confidence) query.set("confidence", params.confidence);
+  if (params?.projectId) query.set("projectId", params.projectId);
 
   return useQuery({
-    queryKey: ['mcq-records', p],
-    queryFn: () => api.get<{ data: { items: any[]; total: number; page: number; limit: number; totalPages: number } }>(`/mcq?${query}`),
-    select: (res) => res.data,
+    queryKey: ["mcq-records", params ?? {}],
+    queryFn: () => api.get<ApiEnvelope<PaginatedData<RawMcqRecord>>>(`/mcq?${query}`),
+    select: (response) => ({
+      ...response.data,
+      items: response.data.items.map(mapMcqRecord),
+    }),
   });
 }
 
 export function useUpdateMcqRecord() {
-  const qc = useQueryClient();
+  const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...data }: { id: string; [key: string]: any }) =>
-      api.patch(`/mcq/${id}`, data),
+    mutationFn: ({ id, ...data }: IdentifierPayload) => api.patch(`/mcq/${id}`, data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['mcq-records'] });
-      toast.success('MCQ record updated');
+      queryClient.invalidateQueries({ queryKey: ["mcq-records"] });
+      toast.success("MCQ record updated");
     },
-    onError: (err: Error) => toast.error(err.message),
+    onError: (error: Error) => toast.error(error.message),
   });
 }
 
-// ──────────────────────────────────────────
 // Review
-// ──────────────────────────────────────────
-
 export function useReviewQueue(params?: { page?: number; limit?: number; status?: string }) {
-  const p = params || {};
   const query = new URLSearchParams();
-  if (p.page) query.set('page', String(p.page));
-  if (p.limit) query.set('limit', String(p.limit));
-  if (p.status) query.set('status', p.status);
+  if (params?.page) query.set("page", String(params.page));
+  if (params?.limit) query.set("limit", String(params.limit));
+  if (params?.status) query.set("status", params.status);
 
   return useQuery({
-    queryKey: ['review', 'queue', p],
-    queryFn: () => api.get<{ data: any }>(`/review/queue?${query}`),
-    select: (res) => res.data,
+    queryKey: ["review", "queue", params ?? {}],
+    queryFn: () => api.get<ApiEnvelope<PaginatedData<ReviewQueueItem> | ReviewQueueItem[]>>(`/review/queue?${query}`),
+    select: (response) => response.data,
   });
 }
 
 export function useReviewDetail(id: string) {
   return useQuery({
-    queryKey: ['review', id],
-    queryFn: () => api.get<{ data: any }>(`/review/${id}`),
-    select: (res) => res.data,
-    enabled: !!id,
+    queryKey: ["review", id],
+    queryFn: () => api.get<ApiEnvelope<ReviewDetail>>(`/review/${id}`),
+    select: (response) => ({
+      ...response.data,
+      confidenceBreakdown: Array.isArray(response.data.confidenceBreakdown)
+        ? response.data.confidenceBreakdown.map((value) => (value > 1 ? value / 100 : value))
+        : [],
+    }),
+    enabled: Boolean(id),
   });
 }
 
 export function useReviewNavigation(id: string) {
   return useQuery({
-    queryKey: ['review', id, 'navigation'],
-    queryFn: () => api.get<{ data: any }>(`/review/${id}/navigation`),
-    select: (res) => res.data,
-    enabled: !!id,
+    queryKey: ["review", id, "navigation"],
+    queryFn: () => api.get<ApiEnvelope<ReviewNavigation>>(`/review/${id}/navigation`),
+    select: (response) => response.data,
+    enabled: Boolean(id),
   });
 }
 
 export function useApproveReview() {
-  const qc = useQueryClient();
+  const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...data }: { id: string; notes?: string }) =>
-      api.post(`/review/${id}/approve`, data),
+    mutationFn: ({ id, ...data }: IdentifierPayload) => api.post(`/review/${id}/approve`, data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['review'] });
-      toast.success('Review approved');
+      queryClient.invalidateQueries({ queryKey: ["review"] });
+      toast.success("Review approved");
     },
-    onError: (err: Error) => toast.error(err.message),
+    onError: (error: Error) => toast.error(error.message),
   });
 }
 
 export function useRejectReview() {
-  const qc = useQueryClient();
+  const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...data }: { id: string; reason?: string }) =>
-      api.post(`/review/${id}/reject`, data),
+    mutationFn: ({ id, ...data }: IdentifierPayload) => api.post(`/review/${id}/reject`, data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['review'] });
-      toast.success('Review rejected');
+      queryClient.invalidateQueries({ queryKey: ["review"] });
+      toast.success("Review rejected");
     },
-    onError: (err: Error) => toast.error(err.message),
+    onError: (error: Error) => toast.error(error.message),
   });
 }
 
 export function useFlagReview() {
-  const qc = useQueryClient();
+  const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...data }: { id: string; reason?: string }) =>
-      api.post(`/review/${id}/flag`, data),
+    mutationFn: ({ id, ...data }: IdentifierPayload) => api.post(`/review/${id}/flag`, data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['review'] });
-      toast.success('Review flagged');
+      queryClient.invalidateQueries({ queryKey: ["review"] });
+      toast.success("Review flagged");
     },
-    onError: (err: Error) => toast.error(err.message),
+    onError: (error: Error) => toast.error(error.message),
   });
 }
 
 export function useEditReview() {
-  const qc = useQueryClient();
+  const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...data }: { id: string; [key: string]: any }) =>
-      api.patch(`/review/${id}/edit`, data),
+    mutationFn: ({ id, ...data }: IdentifierPayload) => api.patch(`/review/${id}/edit`, data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['review'] });
-      toast.success('Review updated');
+      queryClient.invalidateQueries({ queryKey: ["review"] });
+      toast.success("Review updated");
     },
-    onError: (err: Error) => toast.error(err.message),
+    onError: (error: Error) => toast.error(error.message),
   });
 }
 
 export function useBulkReview() {
-  const qc = useQueryClient();
+  const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (data: { ids: string[]; action: 'approve' | 'reject' | 'flag'; reason?: string }) =>
-      api.post('/review/bulk', data),
+    mutationFn: (data: { ids: string[]; action: "approve" | "reject" | "flag"; reason?: string }) =>
+      api.post("/review/bulk", data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['review'] });
-      toast.success('Bulk review completed');
+      queryClient.invalidateQueries({ queryKey: ["review"] });
+      toast.success("Bulk review completed");
     },
-    onError: (err: Error) => toast.error(err.message),
+    onError: (error: Error) => toast.error(error.message),
   });
 }
 
-// ──────────────────────────────────────────
 // Analytics
-// ──────────────────────────────────────────
-
 export function useAnalyticsTimeSeries(params?: { days?: number }) {
   const query = new URLSearchParams();
-  if (params?.days) query.set('days', String(params.days));
+  if (params?.days) query.set("days", String(params.days));
 
   return useQuery({
-    queryKey: ['analytics', 'time-series', params],
-    queryFn: () => api.get<{ data: any[] }>(`/analytics/time-series?${query}`),
-    select: (res) => res.data,
+    queryKey: ["analytics", "time-series", params ?? {}],
+    queryFn: () => api.get<ApiEnvelope<AnalyticsTimeSeriesPoint[]>>(`/analytics/time-series?${query}`),
+    select: (response) => response.data,
   });
 }
 
 export function useConfidenceDistribution() {
   return useQuery({
-    queryKey: ['analytics', 'confidence-distribution'],
-    queryFn: () => api.get<{ data: any[] }>('/analytics/confidence-distribution'),
-    select: (res) => res.data,
+    queryKey: ["analytics", "confidence-distribution"],
+    queryFn: () => api.get<ApiEnvelope<ConfidenceDistributionBucket[]>>("/analytics/confidence-distribution"),
+    select: (response) => response.data,
   });
 }
 
 export function useProviderComparison() {
   return useQuery({
-    queryKey: ['analytics', 'provider-comparison'],
-    queryFn: () => api.get<{ data: any[] }>('/analytics/provider-comparison'),
-    select: (res) => res.data,
+    queryKey: ["analytics", "provider-comparison"],
+    queryFn: () => api.get<ApiEnvelope<ProviderComparisonPoint[]>>("/analytics/provider-comparison"),
+    select: (response) => response.data,
   });
 }
 
 export function useProcessingTimeTrend() {
   return useQuery({
-    queryKey: ['analytics', 'processing-time'],
-    queryFn: () => api.get<{ data: any[] }>('/analytics/processing-time'),
-    select: (res) => res.data,
+    queryKey: ["analytics", "processing-time"],
+    queryFn: () => api.get<ApiEnvelope<ProcessingTimePoint[]>>("/analytics/processing-time"),
+    select: (response) => response.data,
   });
 }
 
 export function useCostBreakdown() {
   return useQuery({
-    queryKey: ['analytics', 'cost-breakdown'],
-    queryFn: () => api.get<{ data: any[] }>('/analytics/cost-breakdown'),
-    select: (res) => res.data,
+    queryKey: ["analytics", "cost-breakdown"],
+    queryFn: () => api.get<ApiEnvelope<CostBreakdownPoint[]>>("/analytics/cost-breakdown"),
+    select: (response) => response.data,
   });
 }
 
 export function useAnalyticsSummary() {
   return useQuery({
-    queryKey: ['analytics', 'summary'],
-    queryFn: () => api.get<{ data: any }>('/analytics/summary'),
-    select: (res) => res.data,
+    queryKey: ["analytics", "summary"],
+    queryFn: () => api.get<ApiEnvelope<RawAnalyticsSummary>>("/analytics/summary"),
+    select: (response): AnalyticsSummary => ({
+      totalExtractions: response.data.totalMcqRecords ?? 0,
+      avgConfidence: response.data.averageConfidence ?? 0,
+      totalCost: response.data.totalCostUsd ?? 0,
+      rejectionRate: 0,
+      extractionsChange: "+0%",
+      confidenceChange: "+0%",
+      costChange: "+0%",
+      rejectionChange: "+0%",
+    }),
   });
 }
 
-// ──────────────────────────────────────────
 // Export
-// ──────────────────────────────────────────
-
 export function useExports(params?: { page?: number; limit?: number }) {
-  const p = params || {};
   const query = new URLSearchParams();
-  if (p.page) query.set('page', String(p.page));
-  if (p.limit) query.set('limit', String(p.limit));
+  if (params?.page) query.set("page", String(params.page));
+  if (params?.limit) query.set("limit", String(params.limit));
 
   return useQuery({
-    queryKey: ['exports', p],
-    queryFn: () => api.get<{ data: any }>(`/export?${query}`),
-    select: (res) => res.data,
+    queryKey: ["exports", params ?? {}],
+    queryFn: () => api.get<ApiEnvelope<PaginatedData<ExportJobItem>>>(`/export?${query}`),
+    select: (response) => response.data,
   });
 }
 
 export function useCreateExport() {
-  const qc = useQueryClient();
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: { format: string; projectId: string; dateFrom?: string; dateTo?: string; minConfidence?: number; status?: string }) =>
-      api.post('/export', data),
+      api.post("/export", data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['exports'] });
-      toast.success('Export started');
+      queryClient.invalidateQueries({ queryKey: ["exports"] });
+      toast.success("Export started");
     },
-    onError: (err: Error) => toast.error(err.message),
+    onError: (error: Error) => toast.error(error.message),
   });
 }
 
 export function useDownloadExport() {
   return useMutation({
     mutationFn: async (id: string) => {
-      const res = await api.get<{ data: { downloadUrl: string } }>(`/export/${id}/download`);
-      window.open(res.data.downloadUrl, '_blank');
+      const response = await api.get<ApiEnvelope<ExportDownloadData>>(`/export/${id}/download`);
+      window.open(response.data.downloadUrl, "_blank", "noopener,noreferrer");
     },
-    onError: (err: Error) => toast.error(err.message),
+    onError: (error: Error) => toast.error(error.message),
   });
 }
 
-// ──────────────────────────────────────────
 // Providers
-// ──────────────────────────────────────────
-
 export function useProviders() {
   return useQuery({
-    queryKey: ['providers'],
-    queryFn: () => api.get<{ data: any[] }>('/providers'),
-    select: (res) => res.data,
+    queryKey: ["providers"],
+    queryFn: () => api.get<ApiEnvelope<RawProvider[]>>("/providers"),
+    select: (response) => response.data.map(mapProvider),
+    refetchInterval: 30_000,
   });
 }
 
 export function useCreateProvider() {
-  const qc = useQueryClient();
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: { displayName: string; category: string; providerType: string; apiKey: string; models: string[]; config?: Record<string, unknown> }) =>
-      api.post('/providers', data),
+      api.post("/providers", data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['providers'] });
-      toast.success('Provider created');
+      queryClient.invalidateQueries({ queryKey: ["providers"] });
+      toast.success("Provider created");
     },
-    onError: (err: Error) => toast.error(err.message),
+    onError: (error: Error) => toast.error(error.message),
   });
 }
 
 export function useUpdateProvider() {
-  const qc = useQueryClient();
+  const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...data }: { id: string; [key: string]: any }) =>
-      api.patch(`/providers/${id}`, data),
+    mutationFn: ({ id, ...data }: IdentifierPayload) => api.patch(`/providers/${id}`, data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['providers'] });
-      toast.success('Provider updated');
+      queryClient.invalidateQueries({ queryKey: ["providers"] });
+      toast.success("Provider updated");
     },
-    onError: (err: Error) => toast.error(err.message),
+    onError: (error: Error) => toast.error(error.message),
   });
 }
 
 export function useDeleteProvider() {
-  const qc = useQueryClient();
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.delete(`/providers/${id}`),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['providers'] });
-      toast.success('Provider deleted');
+      queryClient.invalidateQueries({ queryKey: ["providers"] });
+      toast.success("Provider deleted");
     },
-    onError: (err: Error) => toast.error(err.message),
+    onError: (error: Error) => toast.error(error.message),
   });
 }
 
 export function useTestProvider() {
+  const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => api.post<{ data: any }>(`/providers/${id}/test`),
-    onSuccess: () => toast.success('Provider test passed'),
-    onError: (err: Error) => toast.error(err.message),
+    mutationFn: (id: string) => api.post<ApiEnvelope<ProviderTestResult>>(`/providers/${id}/test`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["providers"] });
+      toast.success("Provider test passed");
+    },
+    onError: (error: Error) => toast.error(error.message),
   });
 }
 
-// ──────────────────────────────────────────
 // Users
-// ──────────────────────────────────────────
-
 export function useUsers() {
   return useQuery({
-    queryKey: ['users'],
-    queryFn: () => api.get<{ data: any[] }>('/users'),
-    select: (res) => res.data,
+    queryKey: ["users"],
+    queryFn: () => api.get<ApiEnvelope<UserItem[] | PaginatedData<Omit<UserItem, "roleLabel" | "lastActive">>>>("/users"),
+    select: (response) => {
+      const items = Array.isArray(response.data) ? response.data : response.data.items;
+      return items.map((user) => ({
+        ...user,
+        roleLabel: mapRoleLabel(user.role),
+        lastActive: formatRelativeTime(user.lastActiveAt),
+        initials: getInitials(user.name),
+      }));
+    },
   });
 }
 
 export function useInviteUser() {
-  const qc = useQueryClient();
+  const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (data: { email: string; role: string }) => api.post('/users/invite', data),
+    mutationFn: (data: { email: string; role: string }) => api.post("/users/invite", data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['users'] });
-      toast.success('User invited');
+      queryClient.invalidateQueries({ queryKey: ["users"] });
+      toast.success("User invited");
     },
-    onError: (err: Error) => toast.error(err.message),
+    onError: (error: Error) => toast.error(error.message),
   });
 }
 
 export function useUpdateUser() {
-  const qc = useQueryClient();
+  const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...data }: { id: string; role?: string; status?: string; name?: string }) =>
-      api.patch(`/users/${id}`, data),
+    mutationFn: ({ id, ...data }: IdentifierPayload) => api.patch(`/users/${id}`, data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['users'] });
-      toast.success('User updated');
+      queryClient.invalidateQueries({ queryKey: ["users"] });
+      toast.success("User updated");
     },
-    onError: (err: Error) => toast.error(err.message),
+    onError: (error: Error) => toast.error(error.message),
   });
 }
 
 export function useDeleteUser() {
-  const qc = useQueryClient();
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.delete(`/users/${id}`),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['users'] });
-      toast.success('User removed');
+      queryClient.invalidateQueries({ queryKey: ["users"] });
+      toast.success("User removed");
     },
-    onError: (err: Error) => toast.error(err.message),
+    onError: (error: Error) => toast.error(error.message),
   });
 }
 
-// ──────────────────────────────────────────
 // Workspace
-// ──────────────────────────────────────────
-
 export function useWorkspace() {
   return useQuery({
-    queryKey: ['workspace'],
-    queryFn: () => api.get<{ data: any }>('/workspace'),
-    select: (res) => res.data,
+    queryKey: ["workspace"],
+    queryFn: () => api.get<ApiEnvelope<RawWorkspace>>("/workspace"),
+    select: (response) => mapWorkspace(response.data),
   });
 }
 
 export function useUpdateWorkspace() {
-  const qc = useQueryClient();
+  const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (data: Record<string, unknown>) => api.patch('/workspace', data),
+    mutationFn: (data: Record<string, unknown>) => api.patch("/workspace", data),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['workspace'] });
-      toast.success('Settings updated');
+      queryClient.invalidateQueries({ queryKey: ["workspace"] });
+      toast.success("Settings updated");
     },
-    onError: (err: Error) => toast.error(err.message),
+    onError: (error: Error) => toast.error(error.message),
   });
 }
 
 export function useWorkspaceUsage() {
   return useQuery({
-    queryKey: ['workspace', 'usage'],
-    queryFn: () => api.get<{ data: any }>('/workspace/usage'),
-    select: (res) => res.data,
+    queryKey: ["workspace", "usage"],
+    queryFn: () => api.get<ApiEnvelope<WorkspaceUsage>>("/workspace/usage"),
+    select: (response) => response.data,
   });
 }
 
-// ──────────────────────────────────────────
-// Audit Logs
-// ──────────────────────────────────────────
-
+// Audit logs
 export function useAuditLogs(params?: { page?: number; limit?: number; action?: string; actorId?: string }) {
-  const p = params || {};
   const query = new URLSearchParams();
-  if (p.page) query.set('page', String(p.page));
-  if (p.limit) query.set('limit', String(p.limit));
-  if (p.action) query.set('action', p.action);
-  if (p.actorId) query.set('actorId', p.actorId);
+  if (params?.page) query.set("page", String(params.page));
+  if (params?.limit) query.set("limit", String(params.limit));
+  if (params?.action) query.set("action", params.action);
+  if (params?.actorId) query.set("actorId", params.actorId);
 
   return useQuery({
-    queryKey: ['audit-logs', p],
-    queryFn: () => api.get<{ data: any }>(`/audit?${query}`),
-    select: (res) => res.data,
+    queryKey: ["audit-logs", params ?? {}],
+    queryFn: () => api.get<ApiEnvelope<PaginatedData<RawAuditLog>>>(`/audit?${query}`),
+    select: (response) => ({
+      ...response.data,
+      items: response.data.items.map(mapAuditLog),
+    }),
   });
 }
 
-// ──────────────────────────────────────────
 // Notifications
-// ──────────────────────────────────────────
-
 export function useNotifications() {
   return useQuery({
-    queryKey: ['notifications'],
-    queryFn: () => api.get<{ data: any[] }>('/notifications'),
-    select: (res) => res.data,
+    queryKey: ["notifications"],
+    queryFn: () => api.get<ApiEnvelope<NotificationItem[]>>("/notifications"),
+    select: (response) => response.data,
     refetchInterval: 30_000,
   });
 }
 
 export function useMarkNotificationRead() {
-  const qc = useQueryClient();
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.patch(`/notifications/${id}/read`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['notifications'] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["notifications"] }),
   });
 }
 
 export function useMarkAllNotificationsRead() {
-  const qc = useQueryClient();
+  const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: () => api.post('/notifications/read-all'),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['notifications'] }),
+    mutationFn: () => api.post("/notifications/read-all"),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["notifications"] }),
   });
 }
 
-// ──────────────────────────────────────────
 // Search
-// ──────────────────────────────────────────
-
 export function useSearch(query: string) {
   return useQuery({
-    queryKey: ['search', query],
-    queryFn: () => api.get<{ data: any[] }>(`/search?q=${encodeURIComponent(query)}`),
-    select: (res) => res.data,
+    queryKey: ["search", query],
+    queryFn: () => api.get<ApiEnvelope<SearchResultItem[]>>(`/search?q=${encodeURIComponent(query)}`),
+    select: (response) => response.data,
     enabled: query.length >= 2,
   });
 }

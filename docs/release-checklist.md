@@ -1,104 +1,47 @@
-# Release Checklist — ExtractIQ MCQ Platform
+# Release Checklist
 
-Use this checklist before every production deployment.
+Use this checklist before promoting a build.
 
----
+## Code and contract checks
 
-## Pre-Release
+- [ ] Backend tests pass: `npm --prefix Backend test`
+- [ ] Backend typecheck passes: `npm --prefix Backend run typecheck`
+- [ ] Web App tests pass: `npm --prefix "Web App" test -- --run`
+- [ ] Web App build passes: `npm --prefix "Web App" run build`
+- [ ] Website tests pass: `npm --prefix Website test -- --run`
+- [ ] Website build passes: `npm --prefix Website run build`
+- [ ] `docs/openapi.yaml` matches the current API envelopes and endpoints
+- [ ] Environment docs reflect `APP_BASE_URL`, SMTP, and `S3_PUBLIC_ENDPOINT`
 
-- [ ] All PRs merged and approved (1+ peer review)
-- [ ] Feature branch deleted after merge
-- [ ] `main` branch is green in CI
+## Local stack rehearsal
 
-### Code Quality
+- [ ] Run [scripts/local-release-check.ps1](/Users/Admin/Desktop/MCQ Platform/scripts/local-release-check.ps1)
+- [ ] Confirm Brevo SMTP credentials are loaded and invite/public-form emails are delivered successfully
+- [ ] Confirm `/api/v1/health/ready` returns all checks `ok`
 
-- [ ] TypeScript strict mode passes: `npx tsc --noEmit` (backend + frontend)
-- [ ] Linting passes: `npm run lint` (all packages)
-- [ ] No `// @ts-ignore` or `// @ts-expect-error` added without justification
+## Workflow verification
 
-### Testing
+- [ ] Website contact form on `/` submits successfully
+- [ ] Website demo request form on `/demo` submits successfully
+- [ ] Operator login works at `/app/login`
+- [ ] Invite acceptance works at `/app/accept-invite`
+- [ ] Upload flow in `/app/upload` completes and can start extraction
+- [ ] Review queue/detail actions work for a seeded or staging review item
+- [ ] Export history renders and completed downloads open correctly
 
-- [ ] Backend tests pass: `cd Backend && npx vitest run` (284+ tests)
-- [ ] Frontend tests pass: `cd "Web App" && npx vitest run` (35+ tests)
-- [ ] No skipped tests (`.skip`) without linked issue
-- [ ] Manual smoke test on staging (login, upload document, extract MCQs, review, export)
+## Production deployment
 
-### Database
+1. Take a database backup.
+2. Deploy with [docker-compose.prod.yml](/Users/Admin/Desktop/MCQ Platform/docker-compose.prod.yml).
+3. If you are attaching to an existing reverse proxy network, also include [docker-compose.prod.proxy.yml](/Users/Admin/Desktop/MCQ Platform/docker-compose.prod.proxy.yml).
+4. Run migrations.
+5. Check `/api/v1/health/ready`.
+6. Re-run the workflow verification list against production or staging.
 
-- [ ] Migrations are backward-compatible (additive only — no column drops or renames)
-- [ ] Migration files committed: `npx drizzle-kit generate` output reviewed
-- [ ] Migration tested on staging database
-- [ ] Backup taken before production migration
+## Do not release if
 
-### Security
-
-- [ ] No secrets or API keys in code (check `.env.example` only has placeholders)
-- [ ] Dependencies audited: `npm audit` — no critical/high vulnerabilities
-- [ ] CORS origin configured correctly for production
-- [ ] Rate limiting enabled on all public endpoints
-
----
-
-## Deployment
-
-### 1. Backup
-
-```bash
-# Database backup
-docker compose exec postgres pg_dump -U postgres mcq_platform | gzip > backup_$(date +%Y%m%d_%H%M%S).sql.gz
-```
-
-### 2. Deploy
-
-```bash
-cd /opt/extractiq
-git pull origin main
-
-# Backend
-docker compose -f docker-compose.prod.yml up -d --build api worker
-
-# Migrations
-cd Backend && npx drizzle-kit migrate
-
-# Frontend (if changed)
-cd "../Web App" && npm ci --omit=dev && npm run build
-cp -r dist/* /var/www/extractiq/webapp/
-```
-
-### 3. Verify
-
-```bash
-# Health checks
-curl http://localhost:4100/api/v1/health
-curl http://localhost:4100/api/v1/health/ready
-
-# Container status
-docker compose -f docker-compose.prod.yml ps
-
-# Check logs for errors
-docker compose logs --tail=50 api worker
-```
-
----
-
-## Post-Release
-
-- [ ] Health endpoint returns `{ status: "ready" }` with all checks `ok`
-- [ ] All containers running and healthy: `docker compose ps`
-- [ ] No error spikes in logs (monitor for 15 minutes)
-- [ ] Key user flows verified: login, document upload, MCQ extraction
-- [ ] Notify team in Slack channel
-- [ ] Tag release: `git tag -a v<VERSION> -m "Release v<VERSION>"` and `git push --tags`
-
----
-
-## Rollback Trigger Criteria
-
-Initiate rollback immediately if any of the following occur within 15 minutes of deployment:
-
-- Health endpoint returns `503` or `degraded`
-- Error rate exceeds 5% of requests
-- Any container in crash loop
-- Database migration failure
-
-See [runbook.md](runbook.md) §7 for rollback procedure.
+- `/health/ready` reports `degraded`
+- `APP_BASE_URL` still points to the wrong surface
+- SMTP is unreachable while email delivery is enabled
+- browser uploads fail because `S3_PUBLIC_ENDPOINT` is not reachable
+- invite acceptance, public intake, review, or export workflows are broken

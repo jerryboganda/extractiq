@@ -3,7 +3,7 @@ import type { ReviewRoutingPayload, NotificationPayload } from '@mcq-platform/qu
 import { enqueue, QUEUE_NAMES } from '@mcq-platform/queue';
 import { db, mcqRecords, reviewItems, jobs, jobTasks } from '@mcq-platform/db';
 import { createLogger } from '@mcq-platform/logger';
-import { eq, and, sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 
 const logger = createLogger('worker:review-routing');
 
@@ -41,7 +41,7 @@ export async function processReviewRouting(job: Job<ReviewRoutingPayload>) {
   let reviewStatus: string;
   let severity: string | null = null;
 
-  if (hallucinationRisk === 'critical' || flags.includes('identical_options') || flags.includes('missing_question_text')) {
+  if (hallucinationRisk === 'high' || flags.includes('identical_options') || flags.includes('missing_question_text')) {
     // Auto-reject
     reviewStatus = 'rejected';
     severity = 'critical';
@@ -50,7 +50,7 @@ export async function processReviewRouting(job: Job<ReviewRoutingPayload>) {
     reviewStatus = 'approved';
   } else {
     // Route to review queue
-    reviewStatus = 'needs_review';
+    reviewStatus = 'pending';
     severity = hallucinationRisk === 'high' ? 'high' :
       confidence < 0.7 ? 'high' :
       confidence < 0.85 ? 'medium' : 'low';
@@ -63,14 +63,14 @@ export async function processReviewRouting(job: Job<ReviewRoutingPayload>) {
   }).where(eq(mcqRecords.id, mcqRecordId));
 
   // Create review item if needs review or rejected
-  if (reviewStatus === 'needs_review' || reviewStatus === 'rejected') {
+  if (reviewStatus === 'pending' || reviewStatus === 'rejected') {
     await db.insert(reviewItems).values({
       mcqRecordId,
       workspaceId,
       severity: severity ?? 'medium',
       flagTypes: flags,
       reasonSummary: buildReasonSummary(confidence, flags, hallucinationRisk),
-      status: reviewStatus === 'rejected' ? 'auto_rejected' : 'pending',
+      status: 'pending',
     });
   }
 
@@ -124,7 +124,7 @@ async function updateJobProgress(jobId: string) {
     failedTasks: failed,
     progressPercent,
     ...(isComplete && {
-      status: failed > 0 ? 'completed_with_errors' : 'completed',
+      status: failed > 0 ? 'failed' : 'completed',
       completedAt: new Date(),
     }),
   }).where(eq(jobs.id, jobId));

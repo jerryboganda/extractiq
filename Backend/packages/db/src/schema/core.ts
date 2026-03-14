@@ -5,7 +5,6 @@ import {
   text,
   timestamp,
   integer,
-  boolean,
   jsonb,
   uniqueIndex,
   index,
@@ -60,6 +59,21 @@ export const refreshTokens = pgTable('refresh_tokens', {
 }, (t) => [
   index('refresh_tokens_user_id_idx').on(t.userId),
   index('refresh_tokens_token_hash_idx').on(t.tokenHash),
+]);
+
+export const invitationTokens = pgTable('invitation_tokens', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  invitedBy: uuid('invited_by').notNull().references(() => users.id),
+  tokenHash: text('token_hash').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  acceptedAt: timestamp('accepted_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex('invitation_tokens_token_hash_idx').on(t.tokenHash),
+  index('invitation_tokens_workspace_id_idx').on(t.workspaceId),
+  index('invitation_tokens_user_id_idx').on(t.userId),
 ]);
 
 // ──────────────────────────────────────────────

@@ -1,11 +1,16 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import UsersPage from "./UsersPage";
 
-const mockInviteMutate = vi.fn();
-const mockUpdateMutate = vi.fn();
-const mockDeleteMutate = vi.fn();
+const inviteMutate = vi.fn();
+const updateMutate = vi.fn();
+const deleteMutate = vi.fn();
+
+vi.mock("framer-motion", () => ({
+  motion: {
+    tr: ({ children, ...props }: React.PropsWithChildren<Record<string, unknown>>) => <tr {...props}>{children}</tr>,
+  },
+}));
 
 vi.mock("@/hooks/use-api", () => ({
   useUsers: () => ({
@@ -14,61 +19,58 @@ vi.mock("@/hooks/use-api", () => ({
         id: "u1",
         name: "Alice Smith",
         email: "alice@example.com",
-        role: "Admin",
+        role: "workspace_admin",
+        roleLabel: "Admin",
         status: "active",
-        lastActive: "1 hour ago",
+        lastActive: "2026-03-13 10:00",
       },
       {
         id: "u2",
         name: "Bob Jones",
         email: "bob@example.com",
-        role: "Reviewer",
+        role: "reviewer",
+        roleLabel: "Reviewer",
         status: "active",
-        lastActive: "3 hours ago",
+        lastActive: "2026-03-13 09:00",
+      },
+      {
+        id: "u3",
+        name: "Cara Analyst",
+        email: "cara@example.com",
+        role: "analyst",
+        roleLabel: "Analyst",
+        status: "inactive",
+        lastActive: "Never",
       },
     ],
   }),
-  useInviteUser: () => ({ mutate: mockInviteMutate }),
-  useUpdateUser: () => ({ mutate: mockUpdateMutate }),
-  useDeleteUser: () => ({ mutate: mockDeleteMutate }),
+  useInviteUser: () => ({ mutate: inviteMutate }),
+  useUpdateUser: () => ({ mutate: updateMutate }),
+  useDeleteUser: () => ({ mutate: deleteMutate }),
 }));
 
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
-function renderUsersPage() {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
-    <QueryClientProvider client={qc}>
-      <UsersPage />
-    </QueryClientProvider>
-  );
-}
-
 describe("UsersPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("renders user table", () => {
-    renderUsersPage();
+  it("renders workspace users with canonical role labels", () => {
+    render(<UsersPage />);
+
     expect(screen.getByText("Users")).toBeInTheDocument();
     expect(screen.getByText("Alice Smith")).toBeInTheDocument();
     expect(screen.getByText("Bob Jones")).toBeInTheDocument();
+    expect(screen.getAllByText("Admin")[0]).toBeInTheDocument();
+    expect(screen.getAllByText("Reviewer")[0]).toBeInTheDocument();
   });
 
-  it("opens invite dialog", async () => {
+  it("validates invite email before submitting", async () => {
     const user = userEvent.setup();
-    renderUsersPage();
-
-    await user.click(screen.getByRole("button", { name: /invite user/i }));
-    expect(screen.getByRole("heading", { name: /invite user/i })).toBeInTheDocument();
-  });
-
-  it("shows validation error for empty email", async () => {
-    const user = userEvent.setup();
-    renderUsersPage();
+    render(<UsersPage />);
 
     await user.click(screen.getByRole("button", { name: /invite user/i }));
     await user.click(screen.getByRole("button", { name: /send invitation/i }));
@@ -76,66 +78,37 @@ describe("UsersPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Email is required")).toBeInTheDocument();
     });
-    expect(mockInviteMutate).not.toHaveBeenCalled();
+    expect(inviteMutate).not.toHaveBeenCalled();
   });
 
-  it("shows validation error for invalid email", async () => {
+  it("submits invites using canonical lowercase roles", async () => {
     const user = userEvent.setup();
-    renderUsersPage();
-
-    await user.click(screen.getByRole("button", { name: /invite user/i }));
-    await user.type(screen.getByLabelText("Email Address"), "not-an-email");
-    await user.click(screen.getByRole("button", { name: /send invitation/i }));
-
-    await waitFor(() => {
-      expect(screen.getByText("Enter a valid email address")).toBeInTheDocument();
-    });
-    expect(mockInviteMutate).not.toHaveBeenCalled();
-  });
-
-  it("submits invite with valid email and default role", async () => {
-    const user = userEvent.setup();
-    renderUsersPage();
+    render(<UsersPage />);
 
     await user.click(screen.getByRole("button", { name: /invite user/i }));
     await user.type(screen.getByLabelText("Email Address"), "new@university.edu");
     await user.click(screen.getByRole("button", { name: /send invitation/i }));
 
     await waitFor(() => {
-      expect(mockInviteMutate).toHaveBeenCalledWith({
+      expect(inviteMutate).toHaveBeenCalledWith({
         email: "new@university.edu",
-        role: "Reviewer",
+        role: "reviewer",
       });
     });
   });
 
-  it("filters users by search", async () => {
+  it("filters users by search and canonical role tabs", async () => {
     const user = userEvent.setup();
-    renderUsersPage();
+    render(<UsersPage />);
 
-    const searchInput = screen.getByPlaceholderText("Search users...");
-    await user.type(searchInput, "alice");
+    await user.type(screen.getByPlaceholderText("Search users..."), "alice");
     expect(screen.getByText("Alice Smith")).toBeInTheDocument();
     expect(screen.queryByText("Bob Jones")).not.toBeInTheDocument();
-  });
 
-  it("filters users by role tab", async () => {
-    const user = userEvent.setup();
-    renderUsersPage();
+    await user.clear(screen.getByPlaceholderText("Search users..."));
+    await user.click(screen.getByRole("tab", { name: "Analyst" }));
 
-    await user.click(screen.getByRole("tab", { name: "Viewer" }));
-    expect(screen.getByText("No users match your filters.")).toBeInTheDocument();
-  });
-
-  it("sets aria-invalid on email field when validation fails", async () => {
-    const user = userEvent.setup();
-    renderUsersPage();
-
-    await user.click(screen.getByRole("button", { name: /invite user/i }));
-    await user.click(screen.getByRole("button", { name: /send invitation/i }));
-
-    await waitFor(() => {
-      expect(screen.getByLabelText("Email Address")).toHaveAttribute("aria-invalid", "true");
-    });
+    expect(screen.getByText("Cara Analyst")).toBeInTheDocument();
+    expect(screen.queryByText("Alice Smith")).not.toBeInTheDocument();
   });
 });

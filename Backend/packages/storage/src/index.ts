@@ -27,6 +27,19 @@ const s3 = new S3Client({
 
 const BUCKET = env.S3_BUCKET;
 
+function replaceEndpointHost(url: string, targetEndpoint: string): string {
+  try {
+    const signed = new URL(url);
+    const target = new URL(targetEndpoint);
+    signed.protocol = target.protocol;
+    signed.hostname = target.hostname;
+    signed.port = target.port;
+    return signed.toString();
+  } catch {
+    return url;
+  }
+}
+
 export interface UploadParams {
   key: string;
   body: Buffer | Readable | ReadableStream | Blob | string;
@@ -76,7 +89,8 @@ export async function getPresignedUploadUrl({
     ContentType: contentType,
   });
 
-  return getSignedUrl(s3, command, { expiresIn });
+  const signedUrl = await getSignedUrl(s3, command, { expiresIn });
+  return replaceEndpointHost(signedUrl, env.S3_PUBLIC_ENDPOINT || env.S3_ENDPOINT);
 }
 
 /**
@@ -95,7 +109,8 @@ export async function getPresignedDownloadUrl({
     }),
   });
 
-  return getSignedUrl(s3, command, { expiresIn });
+  const signedUrl = await getSignedUrl(s3, command, { expiresIn });
+  return replaceEndpointHost(signedUrl, env.S3_PUBLIC_ENDPOINT || env.S3_ENDPOINT);
 }
 
 /**

@@ -22,15 +22,20 @@ export async function get(req: Request, res: Response, next: NextFunction) {
 export async function update(req: Request, res: Response, next: NextFunction) {
   try {
     const updates: Record<string, unknown> = {};
-    if (req.body.name) updates.name = req.body.name;
+    if (req.body.name !== undefined) updates.name = req.body.name;
     if (typeof req.body.maxFileSizeMb === 'number') updates.maxFileSizeMb = req.body.maxFileSizeMb;
     if (req.body.autoApproveThreshold !== undefined) updates.autoApproveThreshold = req.body.autoApproveThreshold;
 
-    // Handle settings sub-fields
-    if (req.body.emailNotifications !== undefined || req.body.webhookUrl !== undefined) {
+    // Settings-backed workspace fields live in the settings JSON blob.
+    if (
+      req.body.description !== undefined ||
+      req.body.emailNotifications !== undefined ||
+      req.body.webhookUrl !== undefined
+    ) {
       const [current] = await db.select().from(workspaces).where(eq(workspaces.id, req.workspaceId)).limit(1);
       const currentSettings = (current?.settings ?? {}) as Record<string, unknown>;
 
+      if (req.body.description !== undefined) currentSettings.description = req.body.description;
       if (req.body.emailNotifications !== undefined) currentSettings.emailNotifications = req.body.emailNotifications;
       if (req.body.webhookUrl !== undefined) currentSettings.webhookUrl = req.body.webhookUrl;
 

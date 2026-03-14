@@ -12,7 +12,7 @@ const workspaceData = {
   plan: "pro",
   apiKey: "sk_live_mcq_test123",
   maxFileSizeMb: 50,
-  autoApproveThreshold: false,
+  autoApproveThreshold: null,
   settings: { emailNotifications: true, webhookUrl: "" },
 };
 
@@ -96,7 +96,12 @@ describe("SettingsPage", () => {
 
     await waitFor(() => {
       expect(mockMutate).toHaveBeenCalledWith(
-        expect.objectContaining({ name: "Updated Workspace" }),
+        expect.objectContaining({
+          name: "Updated Workspace",
+          description: "A test workspace",
+          autoApproveThreshold: null,
+          webhookUrl: null,
+        }),
       );
     });
   });

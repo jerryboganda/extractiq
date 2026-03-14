@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Search, UserPlus, MoreVertical, Shield, Eye, UserX } from "lucide-react";
@@ -15,17 +15,19 @@ import { useUsers, useInviteUser, useUpdateUser, useDeleteUser } from "@/hooks/u
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import type { UserItem } from "@/lib/api-types";
 
 const inviteFormSchema = z.object({
   email: z.string().min(1, "Email is required").email("Enter a valid email address"),
-  role: z.enum(["Admin", "Reviewer", "Viewer"], { required_error: "Select a role" }),
+  role: z.enum(["workspace_admin", "reviewer", "analyst", "operator"], { required_error: "Select a role" }),
 });
 type InviteFormValues = z.infer<typeof inviteFormSchema>;
 
 const roleColors: Record<string, string> = {
-  Admin: "bg-violet/10 text-violet border-violet/20",
-  Reviewer: "bg-info/10 text-info border-info/20",
-  Viewer: "bg-muted text-muted-foreground",
+  workspace_admin: "bg-violet/10 text-violet border-violet/20",
+  reviewer: "bg-info/10 text-info border-info/20",
+  analyst: "bg-muted text-muted-foreground",
+  operator: "bg-primary/10 text-primary border-primary/20",
 };
 
 const rowVariants = {
@@ -37,6 +39,13 @@ const rowVariants = {
   }),
 };
 
+const assignableRoles = [
+  { value: "workspace_admin", label: "Admin" },
+  { value: "reviewer", label: "Reviewer" },
+  { value: "analyst", label: "Analyst" },
+  { value: "operator", label: "Operator" },
+] as const;
+
 export default function UsersPage() {
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
@@ -44,7 +53,7 @@ export default function UsersPage() {
 
   const { register, handleSubmit, reset, control, formState: { errors } } = useForm<InviteFormValues>({
     resolver: zodResolver(inviteFormSchema),
-    defaultValues: { email: "", role: "Reviewer" },
+    defaultValues: { email: "", role: "reviewer" },
   });
 
   const { data: usersData } = useUsers();
@@ -53,7 +62,7 @@ export default function UsersPage() {
   const deleteUser = useDeleteUser();
   const allUsers = usersData ?? [];
 
-  const filtered = allUsers.filter((u: any) => {
+  const filtered = allUsers.filter((u: UserItem) => {
     const matchesSearch = !search || (u.name || '').toLowerCase().includes(search.toLowerCase()) || (u.email || '').toLowerCase().includes(search.toLowerCase());
     const matchesRole = roleFilter === "all" || u.role === roleFilter;
     return matchesSearch && matchesRole;
@@ -77,7 +86,10 @@ export default function UsersPage() {
             <Button size="sm" className="gap-2"><UserPlus className="h-3.5 w-3.5" /> Invite User</Button>
           </DialogTrigger>
           <DialogContent className="glass">
-            <DialogHeader><DialogTitle>Invite User</DialogTitle></DialogHeader>
+            <DialogHeader>
+              <DialogTitle>Invite User</DialogTitle>
+              <DialogDescription>Send a workspace invitation with role-based access and a password setup link.</DialogDescription>
+            </DialogHeader>
             <form onSubmit={handleSubmit(onInviteSubmit)} className="space-y-4 py-2" noValidate>
               <div>
                 <label htmlFor="invite-email" className="text-xs font-medium text-muted-foreground mb-1.5 block">Email Address</label>
@@ -90,9 +102,9 @@ export default function UsersPage() {
                   <Select value={field.value} onValueChange={field.onChange}>
                     <SelectTrigger className="h-9 text-sm" aria-invalid={!!errors.role}><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="Admin">Admin</SelectItem>
-                      <SelectItem value="Reviewer">Reviewer</SelectItem>
-                      <SelectItem value="Viewer">Viewer</SelectItem>
+                      {assignableRoles.map((role) => (
+                        <SelectItem key={role.value} value={role.value}>{role.label}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 )} />
@@ -115,9 +127,10 @@ export default function UsersPage() {
         <Tabs value={roleFilter} onValueChange={setRoleFilter}>
           <TabsList className="h-9">
             <TabsTrigger value="all" className="text-xs">All</TabsTrigger>
-            <TabsTrigger value="Admin" className="text-xs">Admin</TabsTrigger>
-            <TabsTrigger value="Reviewer" className="text-xs">Reviewer</TabsTrigger>
-            <TabsTrigger value="Viewer" className="text-xs">Viewer</TabsTrigger>
+            <TabsTrigger value="workspace_admin" className="text-xs">Admin</TabsTrigger>
+            <TabsTrigger value="reviewer" className="text-xs">Reviewer</TabsTrigger>
+            <TabsTrigger value="analyst" className="text-xs">Analyst</TabsTrigger>
+            <TabsTrigger value="operator" className="text-xs">Operator</TabsTrigger>
           </TabsList>
         </Tabs>
       </div>
@@ -146,14 +159,14 @@ export default function UsersPage() {
                 >
                   <td className="p-3">
                     <div className="flex items-center gap-2.5">
-                      <Avatar className="h-7 w-7"><AvatarFallback className="text-[10px] bg-primary/10 text-primary font-semibold">{(user.name || '').split(' ').map((n: string) => n[0]).join('').slice(0, 2)}</AvatarFallback></Avatar>
+                      <Avatar className="h-7 w-7"><AvatarFallback className="text-[10px] bg-primary/10 text-primary font-semibold">{user.initials}</AvatarFallback></Avatar>
                       <div className="min-w-0">
                         <p className="text-sm font-medium truncate">{user.name}</p>
                         <p className="text-[11px] text-muted-foreground truncate">{user.email}</p>
                       </div>
                     </div>
                   </td>
-                  <td className="p-3"><Badge className={`text-[10px] px-1.5 py-0 ${roleColors[user.role]}`}>{user.role}</Badge></td>
+                  <td className="p-3"><Badge className={`text-[10px] px-1.5 py-0 ${roleColors[user.role]}`}>{user.roleLabel ?? user.role}</Badge></td>
                   <td className="p-3 hidden sm:table-cell">
                     <div className="flex items-center gap-1.5">
                       <span className={`h-1.5 w-1.5 rounded-full ${user.status === "active" ? "bg-success" : "bg-muted-foreground"}`} />
@@ -170,8 +183,8 @@ export default function UsersPage() {
                         <DropdownMenuSub>
                           <DropdownMenuSubTrigger className="gap-2"><Shield className="h-3.5 w-3.5" /> Change Role</DropdownMenuSubTrigger>
                           <DropdownMenuSubContent>
-                            {["Admin", "Reviewer", "Viewer"].map((r) => (
-                            <DropdownMenuItem key={r} onClick={() => updateUser.mutate({ id: user.id, role: r })}>{r}</DropdownMenuItem>
+                            {assignableRoles.map((r) => (
+                            <DropdownMenuItem key={r.value} onClick={() => updateUser.mutate({ id: user.id, role: r.value })}>{r.label}</DropdownMenuItem>
                             ))}
                           </DropdownMenuSubContent>
                         </DropdownMenuSub>

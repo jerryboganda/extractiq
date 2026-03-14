@@ -124,12 +124,21 @@ export interface ProviderHealthCheckPayload {
 }
 
 export interface NotificationPayload {
-  workspaceId: string;
-  userId: string;
+  workspaceId?: string;
+  userId?: string;
   type: string;
   title: string;
   message: string;
   data?: Record<string, unknown>;
+  recipientUserIds?: string[];
+  emails?: Array<{
+    to: string;
+    subject: string;
+    text: string;
+    html?: string;
+  }>;
+  relatedType?: string;
+  relatedId?: string;
 }
 
 // ──────────────────────────────────────────────
@@ -244,8 +253,7 @@ export async function enqueue<T>(
   const cfg = QUEUE_CONFIG[queueName];
   const queue = getQueue<T>(queueName);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const job = await queue.add(queueName as any, data as any, {
+  const job = await queue.add(queueName as never, data as never, {
     attempts: cfg.maxRetries + 1,
     backoff: {
       type: cfg.backoffType,

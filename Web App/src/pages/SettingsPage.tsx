@@ -9,8 +9,7 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
-import { Save, AlertTriangle, Key, Webhook, CreditCard, Link2, Copy, Eye, EyeOff, Loader2 } from "lucide-react";
+import { Save, Key, Webhook, CreditCard, Copy, Eye, EyeOff, Loader2, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspace, useUpdateWorkspace, useWorkspaceUsage } from "@/hooks/use-api";
 
@@ -18,19 +17,12 @@ const settingsSchema = z.object({
   name: z.string().min(1, "Workspace name is required").max(100, "Name must be 100 characters or less"),
   description: z.string().max(500, "Description must be 500 characters or less").optional().or(z.literal("")),
   maxFileSizeMb: z.coerce.number().int().min(1, "Minimum 1 MB").max(500, "Maximum 500 MB"),
-  autoApproveThreshold: z.boolean(),
+  autoApproveEnabled: z.boolean(),
   emailNotifications: z.boolean(),
   webhookUrl: z.string().url("Must be a valid URL").optional().or(z.literal("")),
 });
 
 type SettingsFormValues = z.infer<typeof settingsSchema>;
-
-const integrations = [
-  { name: "Slack", connected: true },
-  { name: "Microsoft Teams", connected: false },
-  { name: "Zapier", connected: false },
-  { name: "Google Drive", connected: true },
-];
 
 export default function SettingsPage() {
   const { data: workspace, isLoading } = useWorkspace();
@@ -50,7 +42,7 @@ export default function SettingsPage() {
       name: "",
       description: "",
       maxFileSizeMb: 50,
-      autoApproveThreshold: false,
+      autoApproveEnabled: false,
       emailNotifications: true,
       webhookUrl: "",
     },
@@ -63,7 +55,7 @@ export default function SettingsPage() {
         name: workspace.name ?? "",
         description: workspace.description ?? "",
         maxFileSizeMb: workspace.maxFileSizeMb ?? 50,
-        autoApproveThreshold: !!workspace.autoApproveThreshold,
+        autoApproveEnabled: workspace.autoApproveThreshold !== null && workspace.autoApproveThreshold !== undefined,
         emailNotifications: settings.emailNotifications !== false,
         webhookUrl: (settings.webhookUrl as string) ?? "",
       });
@@ -71,16 +63,18 @@ export default function SettingsPage() {
   }, [workspace, reset]);
 
   const onSubmit = (data: SettingsFormValues) => {
+    const trimmedDescription = data.description?.trim() ?? "";
+    const trimmedWebhookUrl = data.webhookUrl?.trim() ?? "";
+
     updateWorkspace.mutate({
-      name: data.name,
+      name: data.name.trim(),
+      description: trimmedDescription,
       maxFileSizeMb: data.maxFileSizeMb,
-      autoApproveThreshold: data.autoApproveThreshold,
+      autoApproveThreshold: data.autoApproveEnabled ? (workspace?.autoApproveThreshold ?? 90) : null,
       emailNotifications: data.emailNotifications,
-      webhookUrl: data.webhookUrl || undefined,
+      webhookUrl: trimmedWebhookUrl.length > 0 ? trimmedWebhookUrl : null,
     });
   };
-
-  const handleDelete = () => toast.error("Contact support to delete a workspace");
 
   if (isLoading) {
     return (
@@ -130,9 +124,9 @@ export default function SettingsPage() {
           <div className="flex items-center justify-between max-w-md">
             <div>
               <p className="text-sm font-medium">Auto-approve high confidence</p>
-              <p className="text-xs text-muted-foreground">Automatically approve MCQs above 95% confidence</p>
+              <p className="text-xs text-muted-foreground">Automatically approve MCQs above the workspace threshold</p>
             </div>
-            <Controller name="autoApproveThreshold" control={control} render={({ field }) => (
+            <Controller name="autoApproveEnabled" control={control} render={({ field }) => (
               <Switch checked={field.value} onCheckedChange={field.onChange} />
             )} />
           </div>
@@ -149,7 +143,6 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      {/* API & Webhooks */}
       <Card className="glass border-border">
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
@@ -161,14 +154,21 @@ export default function SettingsPage() {
             <label className="text-xs font-medium text-muted-foreground mb-1.5 block">API Key</label>
             <div className="flex items-center gap-2 max-w-md">
               <Input
-                value={showApiKey ? (workspace?.apiKey ?? "No API key") : "sk_live_mcq_••••••••••••"}
+                value={showApiKey ? (workspace?.apiKey || "No API key generated") : (workspace?.apiKey ? "••••••••••••••••••••••••" : "No API key generated")}
                 readOnly
                 className="h-9 text-sm font-mono flex-1"
               />
-              <Button type="button" variant="outline" size="icon" className="h-9 w-9 shrink-0" onClick={() => setShowApiKey(!showApiKey)}>
+              <Button type="button" variant="outline" size="icon" className="h-9 w-9 shrink-0" onClick={() => setShowApiKey(!showApiKey)} disabled={!workspace?.apiKey}>
                 {showApiKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
               </Button>
-              <Button type="button" variant="outline" size="icon" className="h-9 w-9 shrink-0" onClick={() => { navigator.clipboard.writeText(workspace?.apiKey ?? ""); toast.success("API key copied"); }}>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="h-9 w-9 shrink-0"
+                onClick={() => { if (workspace?.apiKey) { navigator.clipboard.writeText(workspace.apiKey); toast.success("API key copied"); } }}
+                disabled={!workspace?.apiKey}
+              >
                 <Copy className="h-3.5 w-3.5" />
               </Button>
             </div>
@@ -184,16 +184,13 @@ export default function SettingsPage() {
                 placeholder="https://your-server.com/webhook"
                 className="h-9 text-sm flex-1"
               />
-              <Button type="button" variant="outline" size="sm" className="h-9 gap-1.5 shrink-0" onClick={() => toast.success("Webhook test sent")}>
-                <Webhook className="h-3.5 w-3.5" /> Test
-              </Button>
+              <div className="text-xs text-muted-foreground whitespace-nowrap">Saved on update</div>
             </div>
             {errors.webhookUrl && <p className="text-xs text-destructive mt-1">{errors.webhookUrl.message}</p>}
           </div>
         </CardContent>
       </Card>
 
-      {/* Billing & Usage */}
       <Card className="glass border-border">
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
@@ -204,7 +201,7 @@ export default function SettingsPage() {
           <div className="flex items-center justify-between max-w-md">
             <div>
               <p className="text-sm font-medium">Current Plan</p>
-              <p className="text-xs text-muted-foreground">Billed annually</p>
+              <p className="text-xs text-muted-foreground">Usage is tracked against your active workspace plan</p>
             </div>
             <Badge className="bg-primary/10 text-primary border-primary/30">{workspace?.plan ?? "free"}</Badge>
           </div>
@@ -223,60 +220,16 @@ export default function SettingsPage() {
             </div>
             <Progress value={usage && usage.apiCallsLimit > 0 ? Math.round((usage.apiCallsUsed / usage.apiCallsLimit) * 100) : 0} className="h-2" />
           </div>
-          <Button type="button" variant="outline" size="sm" className="gap-1.5" onClick={() => toast.success("Manage plan opened")}>
-            <CreditCard className="h-3.5 w-3.5" /> Manage Plan
+        </CardContent>
+      </Card>
+
+      <Card className="border-warning/30 glass">
+        <CardHeader><CardTitle className="text-base flex items-center gap-2"><AlertTriangle className="h-4 w-4 text-warning" /> Danger Zone</CardTitle></CardHeader>
+        <CardContent>
+          <p className="text-xs text-muted-foreground">Self-serve workspace deletion is not available in the UI yet. Use an operator runbook or admin support path for destructive changes.</p>
+          <Button type="button" variant="destructive" size="sm" className="mt-3" disabled>
+            Delete Workspace
           </Button>
-        </CardContent>
-      </Card>
-
-      {/* Integrations */}
-      <Card className="glass border-border">
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            <Link2 className="h-4 w-4" /> Integrations
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {integrations.map((intg) => (
-              <div key={intg.name} className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
-                <div className="flex items-center gap-2">
-                  <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center">
-                    <Link2 className="h-4 w-4 text-primary" />
-                  </div>
-                  <span className="text-sm font-medium">{intg.name}</span>
-                </div>
-                <Switch
-                  checked={intg.connected}
-                  onCheckedChange={(checked) =>
-                    toast.success(`${intg.name} ${checked ? "connected" : "disconnected"} (demo)`)
-                  }
-                />
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card className="border-destructive/30 glass">
-        <CardHeader><CardTitle className="text-base text-destructive flex items-center gap-2"><AlertTriangle className="h-4 w-4" /> Danger Zone</CardTitle></CardHeader>
-        <CardContent>
-          <p className="text-xs text-muted-foreground mb-3">Permanently delete this workspace and all associated data.</p>
-          <AlertDialog>
-            <AlertDialogTrigger asChild>
-              <Button variant="destructive" size="sm">Delete Workspace</Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
-                <AlertDialogDescription>This action cannot be undone. This will permanently delete the workspace and all associated documents, MCQs, and configurations.</AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Delete</AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
         </CardContent>
       </Card>
 

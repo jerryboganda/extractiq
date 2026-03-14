@@ -323,6 +323,12 @@ export const inviteUserSchema = z.object({
   role: z.enum(['workspace_admin', 'operator', 'reviewer', 'analyst', 'api_user']),
 });
 
+export const acceptInvitationSchema = z.object({
+  token: z.string().min(16),
+  name: z.string().min(1).max(100),
+  password: z.string().min(12),
+});
+
 export const updateUserSchema = z.object({
   role: z.enum(['workspace_admin', 'operator', 'reviewer', 'analyst', 'api_user']).optional(),
   status: z.enum(['active', 'inactive']).optional(),
@@ -345,9 +351,9 @@ const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024;
 /** Sanitize filename: strip path traversal, null bytes, and control characters */
 function sanitizeFilename(name: string): string {
   return name
-    .replace(/[\x00-\x1f]/g, '')         // strip control characters
+    .replace(/[\u0000-\u001f]/g, '')     // strip control characters
     .replace(/\.\./g, '')                 // strip path traversal
-    .replace(/[\/\\]/g, '')              // strip path separators
+    .replace(/[/\\]/g, '')               // strip path separators
     .trim();
 }
 
@@ -467,4 +473,21 @@ export const dateRangeSchema = z.object({
   range: z.enum(['7d', '30d', '90d', 'custom']).default('30d'),
   from: z.string().optional(),
   to: z.string().optional(),
+});
+
+export const publicDemoRequestSchema = z.object({
+  firstName: z.string().min(1).max(100),
+  lastName: z.string().min(1).max(100),
+  email: z.string().email(),
+  company: z.string().min(1).max(150),
+  role: z.string().max(100).optional(),
+  monthlyVolume: z.string().max(100).optional(),
+  useCase: z.string().max(1000).optional(),
+});
+
+export const publicContactRequestSchema = z.object({
+  fullName: z.string().min(1).max(100),
+  email: z.string().email(),
+  company: z.string().min(1).max(150),
+  useCase: z.string().max(1000).optional(),
 });

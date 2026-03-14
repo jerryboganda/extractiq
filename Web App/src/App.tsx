@@ -10,6 +10,8 @@ import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AppLayout } from "@/components/layout/AppLayout";
 import Login from "./pages/Login";
+import AcceptInvitation from "./pages/AcceptInvitation";
+import Register from "./pages/Register";
 
 // Lazy-loaded pages for code splitting
 const Dashboard = lazy(() => import("./pages/Dashboard"));
@@ -59,6 +61,8 @@ const App = () => (
             <ErrorBoundary>
               <Routes>
                 <Route path="login" element={<Login />} />
+                <Route path="register" element={<Register />} />
+                <Route path="accept-invite" element={<AcceptInvitation />} />
                 <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
                   <Route index element={<Suspense fallback={<PageLoader />}><Dashboard /></Suspense>} />
                   <Route path="projects" element={<Suspense fallback={<PageLoader />}><Projects /></Suspense>} />

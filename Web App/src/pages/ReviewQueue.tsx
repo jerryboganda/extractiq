@@ -6,11 +6,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Search, CheckCircle, XCircle, Flag, SkipForward, ListChecks, X } from "lucide-react";
-import { useReviewQueue, useBulkReview } from "@/hooks/use-api";
+import { useReviewQueue, useBulkReview, useApproveReview, useRejectReview, useFlagReview } from "@/hooks/use-api";
 import { EmptyState } from "@/components/EmptyState";
 import { toast } from "sonner";
 import { Checkbox } from "@/components/ui/checkbox";
 import { motion, AnimatePresence } from "framer-motion";
+import type { ReviewQueueItem } from "@/lib/api-types";
 
 const statusStyles: Record<string, string> = {
   pending: "bg-info/10 text-info border-info/20",
@@ -29,15 +30,19 @@ export default function ReviewQueue() {
 
   const { data: reviewData } = useReviewQueue({ status: tab !== 'all' ? tab : undefined });
   const bulkReview = useBulkReview();
-  const reviewQueue = reviewData?.items ?? (Array.isArray(reviewData) ? reviewData : []);
-
+  const approveReview = useApproveReview();
+  const rejectReview = useRejectReview();
+  const flagReview = useFlagReview();
   const filtered = useMemo(() => {
-    return reviewQueue.filter((item: any) => {
+    const reviewQueue = reviewData?.items ?? (Array.isArray(reviewData) ? reviewData : []);
+    return reviewQueue.filter((item: ReviewQueueItem) => {
       if (tab !== "all" && item.status !== tab) return false;
       if (search && !(item.question || '').toLowerCase().includes(search.toLowerCase())) return false;
       return true;
     });
-  }, [tab, search, reviewQueue]);
+  }, [reviewData, search, tab]);
+
+  const reviewQueue = reviewData?.items ?? (Array.isArray(reviewData) ? reviewData : []);
 
   const allSelected = filtered.length > 0 && filtered.every((i) => selectedIds.has(i.id));
   const toggleAll = useCallback(() => {
@@ -169,13 +174,13 @@ export default function ReviewQueue() {
                     <td className="p-3 text-xs text-muted-foreground hidden lg:table-cell">{item.reviewer || "—"}</td>
                     <td className="p-3 text-right" onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center justify-end gap-1">
-                        <Button variant="ghost" size="icon" className="h-7 w-7 text-success hover:text-success hover:bg-success/10" aria-label="Approve" onClick={() => toast.success("MCQ approved")}>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-success hover:text-success hover:bg-success/10" aria-label="Approve" onClick={() => approveReview.mutate({ id: item.id })}>
                           <CheckCircle className="h-3.5 w-3.5" />
                         </Button>
-                        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10" aria-label="Reject" onClick={() => toast.error("MCQ rejected")}>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10" aria-label="Reject" onClick={() => rejectReview.mutate({ id: item.id, reason: "Rejected from review queue" })}>
                           <XCircle className="h-3.5 w-3.5" />
                         </Button>
-                        <Button variant="ghost" size="icon" className="h-7 w-7 text-warning hover:text-warning hover:bg-warning/10 hidden sm:flex" aria-label="Flag" onClick={() => toast("MCQ flagged for review")}>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-warning hover:text-warning hover:bg-warning/10 hidden sm:flex" aria-label="Flag" onClick={() => flagReview.mutate({ id: item.id, reason: "Flagged from review queue" })}>
                           <Flag className="h-3.5 w-3.5" />
                         </Button>
                         <Button variant="ghost" size="icon" className="h-7 w-7 hidden sm:flex" aria-label="Skip">

@@ -5,7 +5,6 @@ import {
   mcqRecords,
   exportJobs,
   exportArtifacts,
-  documents,
 } from '@mcq-platform/db';
 import { upload, buildExportKey } from '@mcq-platform/storage';
 import { createLogger } from '@mcq-platform/logger';

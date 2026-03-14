@@ -86,6 +86,8 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-mcq_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-mcq_platform}
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
       S3_ENDPOINT: http://minio:9000
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-}
+      APP_BASE_URL: ${APP_BASE_URL}
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:4000/api/v1/health"]
       interval: 15s
@@ -106,7 +108,6 @@ services:
         condition: service_healthy
     networks:
       - extractiq
-      - npm_network
 
   worker:
     build:
@@ -121,6 +122,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-mcq_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-mcq_platform}
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
       S3_ENDPOINT: http://minio:9000
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-}
     healthcheck:
       test: ["CMD", "node", "-e", "process.exit(0)"]
       interval: 30s
@@ -141,7 +143,6 @@ services:
         condition: service_healthy
     networks:
       - extractiq
-      - npm_network
 
   # ── Frontend (Website + Web App) ──
   frontend:
@@ -154,7 +155,6 @@ services:
       - "127.0.0.1:4101:80"
     networks:
       - extractiq
-      - npm_network
 
 volumes:
   pgdata:
@@ -165,6 +165,3 @@ networks:
   extractiq:
     name: extractiq
     driver: bridge
-  npm_network:
-    external: true
-    name: nginx-proxy-manager_default

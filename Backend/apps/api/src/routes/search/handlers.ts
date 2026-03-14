@@ -35,19 +35,19 @@ export async function search(req: Request, res: Response, next: NextFunction) {
     const results = [
       ...docResults.map((d) => ({
         id: d.id, type: 'document' as const, name: d.name,
-        status: d.status, metadata: '', url: `/documents/${d.id}`,
+        status: d.status, metadata: '', url: '/documents',
       })),
       ...projectResults.map((p) => ({
         id: p.id, type: 'project' as const, name: p.name,
-        status: p.status, metadata: '', url: `/projects/${p.id}`,
+        status: p.status, metadata: '', url: '/projects',
       })),
       ...mcqResults.map((m) => ({
         id: m.id, type: 'mcq' as const, name: m.name.slice(0, 100),
-        status: m.status, metadata: '', url: `/mcq-records/${m.id}`,
+        status: m.status, metadata: '', url: '/mcq-records',
       })),
       ...jobResults.map((j) => ({
         id: j.id, type: 'job' as const, name: `Job ${j.id.slice(0, 8)}`,
-        status: j.status, metadata: '', url: `/jobs/${j.id}`,
+        status: j.status, metadata: '', url: '/jobs',
       })),
     ];
 

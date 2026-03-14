@@ -70,15 +70,31 @@ describe('workspace handlers', () => {
 
   describe('update', () => {
     it('updates workspace settings', async () => {
-      const current = { id: 'ws-1', settings: { emailNotifications: true, webhookUrl: null } };
+      const current = {
+        id: 'ws-1',
+        settings: { description: 'Old description', emailNotifications: true, webhookUrl: 'https://old.example/webhook' },
+      };
       const selectChain = mockChain([current]);
       mockedDb.select.mockReturnValue(selectChain as any);
 
-      const updated = { id: 'ws-1', name: 'Updated', settings: { emailNotifications: false, webhookUrl: null } };
+      const updated = {
+        id: 'ws-1',
+        name: 'Updated',
+        autoApproveThreshold: 90,
+        settings: { description: 'New description', emailNotifications: false, webhookUrl: null },
+      };
       const updateChain = mockChain([updated]);
       mockedDb.update.mockReturnValue(updateChain as any);
 
-      const req = createReq({ body: { name: 'Updated', emailNotifications: false } });
+      const req = createReq({
+        body: {
+          name: 'Updated',
+          description: 'New description',
+          autoApproveThreshold: 90,
+          emailNotifications: false,
+          webhookUrl: null,
+        },
+      });
       const res = createRes();
       await update(req, res, next);
 

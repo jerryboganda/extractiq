@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { FolderKanban, Plus, Search, MoreVertical, Users } from "lucide-react";
 import { useProjects, useCreateProject } from "@/hooks/use-api";
 import { toast } from "sonner";
@@ -13,6 +13,7 @@ import { StaggerContainer, StaggerItem } from "@/components/StaggerContainer";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import type { ProjectListItem } from "@/lib/api-types";
 
 const createProjectSchema = z.object({
   name: z.string().min(1, "Project name is required").max(100, "Name must be 100 characters or less"),
@@ -40,7 +41,7 @@ export default function Projects() {
   const createProject = useCreateProject();
   const projects = projectsData?.items ?? [];
 
-  const filtered = projects.filter((p: any) => {
+  const filtered = projects.filter((p: ProjectListItem) => {
     const matchesSearch = !search || p.name.toLowerCase().includes(search.toLowerCase()) || (p.description || '').toLowerCase().includes(search.toLowerCase());
     const matchesStatus = statusFilter === "all" || p.status === statusFilter;
     return matchesSearch && matchesStatus;
@@ -64,7 +65,10 @@ export default function Projects() {
             <Button size="sm" className="gap-2"><Plus className="h-3.5 w-3.5" /> New Project</Button>
           </DialogTrigger>
           <DialogContent className="glass">
-            <DialogHeader><DialogTitle>Create New Project</DialogTitle></DialogHeader>
+            <DialogHeader>
+              <DialogTitle>Create New Project</DialogTitle>
+              <DialogDescription>Projects group document uploads, extraction jobs, review items, and exports.</DialogDescription>
+            </DialogHeader>
             <form onSubmit={handleSubmit(onCreateSubmit)} className="space-y-4 py-2">
               <div>
                 <label htmlFor="project-name" className="text-xs font-medium text-muted-foreground mb-1.5 block">Project Name</label>

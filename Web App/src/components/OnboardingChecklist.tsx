@@ -19,12 +19,12 @@ const steps = [
 function getCompleted(): Set<string> {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return new Set(["upload"]); // simulate first step done
+    if (!raw) return new Set();
     const parsed = JSON.parse(raw);
     if (parsed.dismissed) return new Set();
-    return new Set(parsed.completed || ["upload"]);
+    return new Set(parsed.completed || []);
   } catch {
-    return new Set(["upload"]);
+    return new Set();
   }
 }
 

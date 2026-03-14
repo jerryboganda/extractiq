@@ -1,242 +1,243 @@
+import { useMemo, useRef, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Upload, FileUp, X, FileText, Image, FileSpreadsheet, Check, Loader2, Clock, Trash2 } from "lucide-react";
-import { useState, useEffect, useRef } from "react";
-import { motion, AnimatePresence } from "framer-motion";
 import { Progress } from "@/components/ui/progress";
-import { toast } from "@/hooks/use-toast";
+import { Upload, FileText, Loader2, CheckCircle2, AlertTriangle } from "lucide-react";
+import { toast } from "sonner";
+import { useProjects, usePresignUpload, useCompleteUpload, useCreateJob } from "@/hooks/use-api";
+import type { ProjectListItem } from "@/lib/api-types";
 
-interface QueueFile {
+type UploadState = "queued" | "uploading" | "uploaded" | "failed";
+
+interface QueuedFile {
   id: string;
-  name: string;
-  size: string;
+  file: File;
+  status: UploadState;
   progress: number;
-  status: "complete" | "uploading" | "queued";
-  type: "pdf" | "docx" | "image";
+  documentId?: string;
+  error?: string;
 }
 
-let fileIdCounter = 100;
-
-function detectFileType(name: string): "pdf" | "docx" | "image" {
-  const ext = name.split(".").pop()?.toLowerCase() ?? "";
-  if (ext === "pdf") return "pdf";
-  if (["doc", "docx"].includes(ext)) return "docx";
-  return "image";
-}
-
-function formatSize(bytes: number): string {
+function formatSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-const initialQueue: QueueFile[] = [
-  { id: "f1", name: "Cardiology_Final_2025.pdf", size: "8.2 MB", progress: 100, status: "complete", type: "pdf" },
-  { id: "f2", name: "Dermatology_MCQs.pdf", size: "3.1 MB", progress: 42, status: "uploading", type: "pdf" },
-  { id: "f3", name: "Radiology_Images.png", size: "2.4 MB", progress: 0, status: "queued", type: "image" },
-  { id: "f4", name: "Endocrinology_Ch4.docx", size: "5.7 MB", progress: 0, status: "queued", type: "docx" },
-];
-
-const fileIcons: Record<string, React.ElementType> = {
-  pdf: FileText,
-  docx: FileSpreadsheet,
-  image: Image,
-};
-
-const statusIcons: Record<string, React.ElementType> = {
-  complete: Check,
-  uploading: Loader2,
-  queued: Clock,
-};
-
-const itemVariants = {
-  hidden: { opacity: 0, y: 12 },
-  visible: { opacity: 1, y: 0, transition: { type: "spring" as const, stiffness: 300, damping: 24 } },
-  exit: { opacity: 0, x: -40, transition: { duration: 0.2 } },
-};
-
 export default function UploadCenter() {
-  const [dragActive, setDragActive] = useState(false);
-  const [queue, setQueue] = useState<QueueFile[]>(initialQueue);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [queuedFiles, setQueuedFiles] = useState<QueuedFile[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const { data: projectsData } = useProjects({ limit: 100 });
+  const presignUpload = usePresignUpload();
+  const completeUpload = useCompleteUpload();
+  const createJob = useCreateJob();
+
+  const projects = projectsData?.items ?? [];
+  const uploadedDocumentIds = useMemo(
+    () => queuedFiles.filter((file) => file.status === "uploaded" && file.documentId).map((file) => file.documentId as string),
+    [queuedFiles],
+  );
 
   const addFiles = (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    const newFiles: QueueFile[] = Array.from(files).map((f) => ({
-      id: `f_${++fileIdCounter}`,
-      name: f.name,
-      size: formatSize(f.size),
-      progress: 0,
-      status: "queued" as const,
-      type: detectFileType(f.name),
-    }));
-    setQueue((prev) => {
-      const hasUploading = prev.some((f) => f.status === "uploading");
-      if (!hasUploading && newFiles.length > 0) {
-        newFiles[0].status = "uploading";
-        newFiles[0].progress = 1;
-      }
-      return [...prev, ...newFiles];
-    });
-    toast({ title: `${files.length} file(s) added`, description: "Files added to upload queue." });
+    if (!files?.length) return;
+
+    setQueuedFiles((previous) => [
+      ...previous,
+      ...Array.from(files).map((file) => ({
+        id: `${file.name}-${file.lastModified}-${Math.random().toString(36).slice(2, 7)}`,
+        file,
+        status: "queued" as const,
+        progress: 0,
+      })),
+    ]);
   };
 
-  const removeFile = (id: string) => {
-    setQueue((prev) => prev.filter((f) => f.id !== id));
+  const updateQueuedFile = (id: string, patch: Partial<QueuedFile>) => {
+    setQueuedFiles((previous) => previous.map((file) => file.id === id ? { ...file, ...patch } : file));
   };
 
-  const clearCompleted = () => {
-    setQueue((prev) => prev.filter((f) => f.status !== "complete"));
-    toast({ title: "Cleared", description: "Completed files removed from queue." });
-  };
+  const handleUpload = async () => {
+    if (!selectedProjectId) {
+      toast.error("Select a project before uploading.");
+      return;
+    }
 
-  // Animated progress simulation
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setQueue((prev) => {
-        const next = [...prev];
-        const uploading = next.find((f) => f.status === "uploading");
-        if (uploading) {
-          uploading.progress = Math.min(uploading.progress + Math.floor(Math.random() * 8 + 2), 100);
-          if (uploading.progress >= 100) {
-            uploading.status = "complete";
-            const nextQueued = next.find((f) => f.status === "queued");
-            if (nextQueued) {
-              nextQueued.status = "uploading";
-              nextQueued.progress = 1;
-            }
-          }
+    if (queuedFiles.length === 0) {
+      toast.error("Add at least one document to continue.");
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    for (const queuedFile of queuedFiles) {
+      if (queuedFile.status === "uploaded") continue;
+
+      try {
+        updateQueuedFile(queuedFile.id, { status: "uploading", progress: 10, error: undefined });
+
+        const presigned = await presignUpload.mutateAsync({
+          filename: queuedFile.file.name,
+          contentType: queuedFile.file.type || "application/pdf",
+          fileSize: queuedFile.file.size,
+          projectId: selectedProjectId,
+        });
+
+        updateQueuedFile(queuedFile.id, { progress: 40 });
+
+        const uploadResponse = await fetch(presigned.data.uploadUrl, {
+          method: "PUT",
+          headers: {
+            "Content-Type": queuedFile.file.type || "application/pdf",
+          },
+          body: queuedFile.file,
+        });
+
+        if (!uploadResponse.ok) {
+          throw new Error("File upload failed");
         }
-        return next;
-      });
-    }, 400);
-    return () => clearInterval(interval);
-  }, []);
 
-  const completedCount = queue.filter((f) => f.status === "complete").length;
+        updateQueuedFile(queuedFile.id, { progress: 85 });
+
+        await completeUpload.mutateAsync({
+          uploadId: presigned.data.documentId,
+          s3Key: presigned.data.s3Key,
+        });
+
+        updateQueuedFile(queuedFile.id, {
+          progress: 100,
+          status: "uploaded",
+          documentId: presigned.data.documentId,
+        });
+      } catch (error) {
+        updateQueuedFile(queuedFile.id, {
+          status: "failed",
+          progress: 0,
+          error: error instanceof Error ? error.message : "Upload failed",
+        });
+      }
+    }
+
+    setIsSubmitting(false);
+  };
+
+  const handleStartExtraction = async () => {
+    if (!selectedProjectId) {
+      toast.error("Select a project before starting extraction.");
+      return;
+    }
+
+    if (uploadedDocumentIds.length === 0) {
+      toast.error("Upload at least one document successfully first.");
+      return;
+    }
+
+    await createJob.mutateAsync({
+      projectId: selectedProjectId,
+      documentIds: uploadedDocumentIds,
+    });
+  };
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Upload Center</h1>
-        <p className="text-sm text-muted-foreground mt-1">Upload documents for MCQ extraction</p>
+        <p className="text-sm text-muted-foreground mt-1">Upload real documents and push them into the extraction pipeline.</p>
       </div>
 
-      {/* Hidden file input */}
       <input
         ref={fileInputRef}
         type="file"
         multiple
-        accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.webp"
+        accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.webp,.tiff"
         className="hidden"
-        onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }}
+        onChange={(event) => {
+          addFiles(event.target.files);
+          event.target.value = "";
+        }}
       />
 
-      {/* Drop zone */}
-      <Card
-        className={`border-2 border-dashed transition-all duration-300 cursor-pointer ${
-          dragActive
-            ? "border-primary bg-primary/5 scale-[1.01]"
-            : "border-border hover:border-primary/30 hover:bg-muted/20"
-        }`}
-        onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
-        onDragLeave={() => setDragActive(false)}
-        onDrop={(e) => { e.preventDefault(); setDragActive(false); addFiles(e.dataTransfer.files); }}
-        onClick={() => fileInputRef.current?.click()}
-      >
-        <CardContent className="flex flex-col items-center justify-center py-16">
-          <div className={`p-4 rounded-2xl bg-primary/10 mb-4 transition-transform ${dragActive ? "scale-110" : ""}`}>
+      <Card className="border-2 border-dashed border-border hover:border-primary/40 transition-colors">
+        <CardContent className="py-16 text-center space-y-4">
+          <div className="mx-auto w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center">
             <Upload className="h-8 w-8 text-primary" />
           </div>
-          <h3 className="text-lg font-semibold mb-1">Drop files here or click to browse</h3>
-          <p className="text-sm text-muted-foreground mb-4">PDF, DOCX, images — up to 50MB per file</p>
-          <Button variant="outline" className="gap-2" onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}>
-            <FileUp className="h-4 w-4" /> Browse Files
+          <div>
+            <h2 className="text-lg font-semibold">Choose documents to upload</h2>
+            <p className="text-sm text-muted-foreground mt-1">PDF, DOCX, PNG, JPG, TIFF, or WEBP up to 50 MB each.</p>
+          </div>
+          <Button onClick={() => fileInputRef.current?.click()} className="gap-2">
+            <Upload className="h-4 w-4" />
+            Browse Files
           </Button>
         </CardContent>
       </Card>
 
-      {/* File queue */}
       <Card className="glass border-border">
-        <CardContent className="p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-semibold">Upload Queue</h3>
-            {completedCount > 0 && (
-              <Button variant="ghost" size="sm" className="gap-1.5 text-xs h-7" onClick={clearCompleted}>
-                <Trash2 className="h-3 w-3" /> Clear Completed ({completedCount})
-              </Button>
-            )}
+        <CardContent className="p-5 space-y-4">
+          <div className="space-y-2">
+            <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Project</label>
+            <select
+              value={selectedProjectId}
+              onChange={(event) => setSelectedProjectId(event.target.value)}
+              className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
+            >
+              <option value="">Select a project</option>
+              {projects.map((project: ProjectListItem) => (
+                <option key={project.id} value={project.id}>{project.name}</option>
+              ))}
+            </select>
           </div>
-          <div className="space-y-3">
-            <AnimatePresence mode="popLayout">
-              {queue.map((file) => {
-                const FileIcon = fileIcons[file.type] || FileText;
-                const StatusIcon = statusIcons[file.status];
-                return (
-                  <motion.div
-                    key={file.id}
-                    layout
-                    variants={itemVariants}
-                    initial="hidden"
-                    animate="visible"
-                    exit="exit"
-                    className="flex items-center gap-3 p-3 rounded-lg bg-muted/50"
-                  >
-                    <FileIcon className="h-4 w-4 text-muted-foreground shrink-0" />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-sm font-medium truncate">{file.name}</span>
-                        <span className="text-[11px] text-muted-foreground">{file.size}</span>
-                      </div>
-                      <Progress value={file.progress} className="h-1" />
-                    </div>
-                    <StatusIcon className={`h-3.5 w-3.5 shrink-0 ${
-                      file.status === "complete" ? "text-success" : file.status === "uploading" ? "text-primary animate-spin" : "text-muted-foreground"
-                    }`} />
-                    <span className="text-[11px] font-mono text-muted-foreground w-10 text-right">
-                      {file.progress}%
-                    </span>
-                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => removeFile(file.id)}>
-                      <X className="h-3 w-3" />
-                    </Button>
-                  </motion.div>
-                );
-              })}
-            </AnimatePresence>
-            {queue.length === 0 && (
-              <p className="text-center text-sm text-muted-foreground py-6">No files in queue. Drop or browse to add files.</p>
-            )}
+
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={handleUpload} disabled={isSubmitting || queuedFiles.length === 0} className="gap-2">
+              {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+              Upload Files
+            </Button>
+            <Button variant="outline" onClick={handleStartExtraction} disabled={createJob.isPending || uploadedDocumentIds.length === 0} className="gap-2">
+              {createJob.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+              Start Extraction
+            </Button>
           </div>
         </CardContent>
       </Card>
 
-      {/* Upload metadata */}
       <Card className="glass border-border">
-        <CardContent className="p-5 space-y-4">
-          <h3 className="text-sm font-semibold">Upload Settings</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Project</label>
-              <Input placeholder="Select project..." className="h-9 text-sm" />
+        <CardContent className="p-5">
+          <h3 className="text-sm font-semibold mb-4">Upload Queue</h3>
+          {queuedFiles.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No files selected yet.</p>
+          ) : (
+            <div className="space-y-3">
+              {queuedFiles.map((queuedFile) => (
+                <div key={queuedFile.id} className="rounded-lg border border-border p-3 space-y-2">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">{queuedFile.file.name}</p>
+                      <p className="text-xs text-muted-foreground">{formatSize(queuedFile.file.size)}</p>
+                    </div>
+                    <div className="shrink-0">
+                      {queuedFile.status === "uploaded" ? (
+                        <CheckCircle2 className="h-4 w-4 text-success" />
+                      ) : queuedFile.status === "failed" ? (
+                        <AlertTriangle className="h-4 w-4 text-destructive" />
+                      ) : queuedFile.status === "uploading" ? (
+                        <Loader2 className="h-4 w-4 text-primary animate-spin" />
+                      ) : null}
+                    </div>
+                  </div>
+                  <Progress value={queuedFile.progress} className="h-2" />
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span className="capitalize">{queuedFile.status}</span>
+                    <span>{queuedFile.progress}%</span>
+                  </div>
+                  {queuedFile.error ? <p className="text-xs text-destructive">{queuedFile.error}</p> : null}
+                </div>
+              ))}
             </div>
-            <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Tags</label>
-              <Input placeholder="Add tags..." className="h-9 text-sm" />
-            </div>
-          </div>
-          <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Notes</label>
-            <textarea
-              placeholder="Optional notes about this upload batch..."
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring min-h-[80px]"
-            />
-          </div>
-          <div className="flex justify-end">
-            <Button className="gap-2">
-              <Upload className="h-3.5 w-3.5" /> Start Extraction
-            </Button>
-          </div>
+          )}
         </CardContent>
       </Card>
     </div>

@@ -1,11 +1,21 @@
 import type { Request, Response, NextFunction } from 'express';
 import { eq, and, count, desc, sql } from 'drizzle-orm';
-import { db, reviewItems, reviewActions, mcqRecords } from '@mcq-platform/db';
+import { db, reviewItems, reviewActions, mcqRecords, documents, users, mcqRecordHistory } from '@mcq-platform/db';
 import { AppError } from '../../middleware/error-handler.js';
+
+function parsePagination(query: Request['query']) {
+  const page = Number.parseInt(String(query.page ?? '1'), 10);
+  const limit = Number.parseInt(String(query.limit ?? '20'), 10);
+
+  return {
+    page: Number.isFinite(page) && page > 0 ? page : 1,
+    limit: Number.isFinite(limit) && limit > 0 && limit <= 100 ? limit : 20,
+  };
+}
 
 export async function listQueue(req: Request, res: Response, next: NextFunction) {
   try {
-    const { page, limit } = req.query as unknown as { page: number; limit: number };
+    const { page, limit } = parsePagination(req.query);
     const offset = (page - 1) * limit;
 
     const items = await db
@@ -44,15 +54,35 @@ export async function listQueue(req: Request, res: Response, next: NextFunction)
             questionText: mcqRecords.questionText,
             confidence: mcqRecords.confidence,
             options: mcqRecords.options,
+            documentId: mcqRecords.documentId,
           })
           .from(mcqRecords)
           .where(eq(mcqRecords.id, item.mcqRecordId))
           .limit(1);
 
+        const [document] = mcq?.documentId
+          ? await db
+            .select({ filename: documents.filename })
+            .from(documents)
+            .where(eq(documents.id, mcq.documentId))
+            .limit(1)
+          : [];
+
+        const [reviewer] = item.assignedTo
+          ? await db
+            .select({ name: users.name })
+            .from(users)
+            .where(eq(users.id, item.assignedTo))
+            .limit(1)
+          : [];
+
         return {
           ...item,
           question: mcq?.questionText ?? '',
-          confidence: mcq?.confidence ?? 0,
+          confidence: Math.round((mcq?.confidence ?? 0) * 100),
+          document: document?.filename ?? 'Unknown document',
+          reviewer: reviewer?.name ?? null,
+          flags: Array.isArray(item.flagTypes) ? item.flagTypes.length : 0,
         };
       }),
     );
@@ -88,7 +118,34 @@ export async function getDetail(req: Request, res: Response, next: NextFunction)
       .where(eq(reviewActions.reviewItemId, item.id))
       .orderBy(desc(reviewActions.createdAt));
 
-    res.json({ data: { ...item, mcq, actions } });
+    const [document] = await db
+      .select({ filename: documents.filename })
+      .from(documents)
+      .where(eq(documents.id, mcq?.documentId ?? ''))
+      .limit(1);
+
+    res.json({
+      data: {
+        ...item,
+        question: mcq?.questionText ?? '',
+        options: Array.isArray(mcq?.options) ? (mcq?.options as Array<{ text: string }>).map((option) => option.text) : [],
+        correctIndex: Array.isArray(mcq?.options)
+          ? (mcq?.options as Array<{ label: string; text: string }>).findIndex((option) => option.label === mcq?.correctAnswer)
+          : -1,
+        explanation: mcq?.explanation ?? '',
+        confidence: Math.round((mcq?.confidence ?? 0) * 100),
+        confidenceBreakdown: Object.values((mcq?.confidenceBreakdown ?? {}) as Record<string, number>).map((value) => Math.round(value * 100)),
+        status: item.status,
+        document: document?.filename ?? 'Unknown document',
+        page: mcq?.sourcePage ?? 1,
+        sourceExcerpt: mcq?.sourceExcerpt ?? '',
+        pageContent: mcq?.sourceExcerpt ?? '',
+        difficulty: (mcq?.difficulty as 'easy' | 'medium' | 'hard' | undefined) ?? 'medium',
+        tags: Array.isArray(mcq?.flags) ? mcq.flags as string[] : [],
+        reviewer: item.assignedTo,
+        actions,
+      },
+    });
   } catch (err) {
     next(err);
   }
@@ -111,27 +168,28 @@ async function performReviewAction(
 
   if (!item) throw new AppError(404, 'NOT_FOUND', 'Review item not found');
 
-  await db.insert(reviewActions).values({
-    reviewItemId: item.id,
-    actionType,
-    performedBy: userId,
-    changes: changes ?? null,
-    reviewerNotes: notes ?? null,
+  return db.transaction(async (tx) => {
+    await tx.insert(reviewActions).values({
+      reviewItemId: item.id,
+      actionType,
+      performedBy: userId,
+      changes: changes ?? null,
+      reviewerNotes: notes ?? null,
+    });
+
+    const [updated] = await tx
+      .update(reviewItems)
+      .set({ status: newStatus, resolvedAt: new Date() })
+      .where(eq(reviewItems.id, item.id))
+      .returning();
+
+    await tx
+      .update(mcqRecords)
+      .set({ reviewStatus: newStatus, updatedAt: new Date() })
+      .where(eq(mcqRecords.id, item.mcqRecordId));
+
+    return updated;
   });
-
-  const [updated] = await db
-    .update(reviewItems)
-    .set({ status: newStatus, resolvedAt: new Date() })
-    .where(eq(reviewItems.id, item.id))
-    .returning();
-
-  // Update MCQ review status
-  await db
-    .update(mcqRecords)
-    .set({ reviewStatus: newStatus, updatedAt: new Date() })
-    .where(eq(mcqRecords.id, item.mcqRecordId));
-
-  return updated;
 }
 
 export async function approve(req: Request, res: Response, next: NextFunction) {
@@ -181,10 +239,33 @@ export async function edit(req: Request, res: Response, next: NextFunction) {
     if (req.body.explanation) mcqUpdates.explanation = req.body.explanation;
     if (req.body.difficulty) mcqUpdates.difficulty = req.body.difficulty;
     if (req.body.tags) mcqUpdates.flags = req.body.tags;
+    if (req.body.options) {
+      mcqUpdates.options = req.body.options.map((text: string, index: number) => ({
+        label: String.fromCharCode(65 + index),
+        text,
+      }));
+    }
+    if (typeof req.body.correctIndex === 'number' && Array.isArray(req.body.options)) {
+      mcqUpdates.correctAnswer = String.fromCharCode(65 + req.body.correctIndex);
+    }
 
     if (Object.keys(mcqUpdates).length > 0) {
       mcqUpdates.updatedAt = new Date();
-      await db.update(mcqRecords).set(mcqUpdates).where(eq(mcqRecords.id, item.mcqRecordId));
+      const [currentRecord] = await db.select().from(mcqRecords).where(eq(mcqRecords.id, item.mcqRecordId)).limit(1);
+      if (currentRecord) {
+        await db.insert(mcqRecordHistory).values({
+          mcqRecordId: currentRecord.id,
+          version: currentRecord.version,
+          previousValues: currentRecord,
+          changedBy: req.userId,
+          changeType: 'review_edit',
+        });
+      }
+      await db.update(mcqRecords).set({
+        ...mcqUpdates,
+        reviewStatus: 'edited',
+        version: sql`${mcqRecords.version} + 1`,
+      }).where(eq(mcqRecords.id, item.mcqRecordId));
     }
 
     await db.insert(reviewActions).values({
@@ -217,6 +298,7 @@ export async function navigation(req: Request, res: Response, next: NextFunction
 
     res.json({
       data: {
+        ids: allItems.map((item) => item.id),
         previousId: currentIndex > 0 ? allItems[currentIndex - 1].id : null,
         nextId: currentIndex < allItems.length - 1 ? allItems[currentIndex + 1].id : null,
         hasPrevious: currentIndex > 0,

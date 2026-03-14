@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Shield, Zap, BarChart3 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { postPublic } from "@/lib/api";
 
 const valueProps = [
   {
@@ -30,7 +31,7 @@ const Demo = () => {
   const { toast } = useToast();
   const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const form = e.currentTarget;
     const data = new FormData(form);
@@ -50,11 +51,27 @@ const Demo = () => {
     }
 
     setSubmitting(true);
-    setTimeout(() => {
-      setSubmitting(false);
+    try {
+      await postPublic("/public/demo-request", {
+        firstName: first,
+        lastName: last,
+        email,
+        company,
+        role: (data.get("role") as string)?.trim(),
+        monthlyVolume: (data.get("volume") as string)?.trim(),
+        useCase: "Requested from public demo page",
+      });
       toast({ title: "Demo requested!", description: "We'll be in touch within 24 hours." });
       form.reset();
-    }, 1200);
+    } catch (error) {
+      toast({
+        title: "Request failed",
+        description: error instanceof Error ? error.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (

@@ -1,92 +1,84 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import ExportCenter from "./ExportCenter";
 
-// Mock framer-motion
-vi.mock("framer-motion", () => ({
-  motion: {
-    div: ({ children, ...props }: React.PropsWithChildren<Record<string, unknown>>) => {
-      const filtered: Record<string, unknown> = {};
-      for (const [k, v] of Object.entries(props)) {
-        if (!["layout", "variants", "initial", "animate", "exit", "whileHover", "whileTap"].includes(k)) {
-          filtered[k] = v;
-        }
-      }
-      return <div {...filtered}>{children}</div>;
+const createExportMutateAsync = vi.fn();
+const downloadExportMutate = vi.fn();
+
+vi.mock("@/hooks/use-api", () => ({
+  useProjects: () => ({
+    data: {
+      items: [
+        { id: "project-1", name: "Biology" },
+        { id: "project-2", name: "Cardiology" },
+      ],
     },
-  },
-  AnimatePresence: ({ children }: React.PropsWithChildren) => <>{children}</>,
-}));
-
-vi.mock("sonner", () => ({
-  toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }),
-}));
-
-// Mock StaggerContainer
-vi.mock("@/components/StaggerContainer", () => ({
-  StaggerContainer: ({ children, ...props }: React.PropsWithChildren<Record<string, unknown>>) => <div {...props}>{children}</div>,
-  StaggerItem: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
-}));
-
-// Mock UpgradeBanner
-vi.mock("@/components/UpgradeBanner", () => ({
-  UpgradeBanner: ({ title }: { title: string }) => <div data-testid="upgrade-banner">{title}</div>,
+  }),
+  useExports: () => ({
+    data: {
+      items: [
+        { id: "export-1", format: "json", status: "completed", totalRecords: 245, createdAt: "2026-03-13T00:00:00.000Z" },
+        { id: "export-2", format: "csv", status: "processing", totalRecords: 132, createdAt: "2026-03-12T00:00:00.000Z" },
+      ],
+    },
+  }),
+  useCreateExport: () => ({
+    mutateAsync: createExportMutateAsync,
+    isPending: false,
+  }),
+  useDownloadExport: () => ({
+    mutate: downloadExportMutate,
+    isPending: false,
+  }),
 }));
 
 describe("ExportCenter", () => {
-  it("renders heading and format cards", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("renders export formats and history from live data", () => {
     render(<ExportCenter />);
+
     expect(screen.getByText("Export Center")).toBeInTheDocument();
-    // Format names appear in both cards AND history badges, so use getAllByText
-    for (const fmt of ["JSON", "CSV", "QTI", "SCORM", "xAPI"]) {
-      expect(screen.getAllByText(fmt).length).toBeGreaterThanOrEqual(1);
-    }
-  });
-
-  it("renders export configuration section", () => {
-    render(<ExportCenter />);
-    expect(screen.getByText("Export Configuration")).toBeInTheDocument();
-    expect(screen.getByText("Generate Export")).toBeInTheDocument();
-    expect(screen.getByText(/Minimum Confidence/)).toBeInTheDocument();
-  });
-
-  it("shows export history with initial items", () => {
-    render(<ExportCenter />);
+    expect(screen.getByText("JSON")).toBeInTheDocument();
+    expect(screen.getByText("CSV")).toBeInTheDocument();
+    expect(screen.getByText("QTI")).toBeInTheDocument();
     expect(screen.getByText("Export History")).toBeInTheDocument();
-    expect(screen.getByText("245 records")).toBeInTheDocument();
-    expect(screen.getByText("132 records")).toBeInTheDocument();
-    expect(screen.getByText("410 records")).toBeInTheDocument();
+    expect(screen.getByText(/245 records/)).toBeInTheDocument();
   });
 
-  it("shows upgrade banner when 3+ exports exist", () => {
-    render(<ExportCenter />);
-    expect(screen.getByTestId("upgrade-banner")).toHaveTextContent("Export Limit Approaching");
-  });
-
-  it("removes an export from history", async () => {
+  it("creates an export with the selected project and filters", async () => {
     const user = userEvent.setup();
     render(<ExportCenter />);
 
-    expect(screen.getByText("245 records")).toBeInTheDocument();
+    await user.selectOptions(screen.getByRole("combobox"), "project-1");
+    await user.clear(screen.getByDisplayValue("75"));
+    await user.type(screen.getByRole("spinbutton"), "80");
+    await user.click(screen.getByRole("button", { name: /generate export/i }));
 
-    // History has Download and delete buttons per row. Find the trash buttons by looking for SVGs.
-    const allButtons = screen.getAllByRole("button");
-    // The delete buttons have the destructive hover class
-    const deleteButtons = allButtons.filter(
-      (btn) => btn.className.includes("hover:text-destructive"),
-    );
-    expect(deleteButtons.length).toBeGreaterThanOrEqual(3);
-
-    await user.click(deleteButtons[0]);
-    expect(screen.queryByText("245 records")).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(createExportMutateAsync).toHaveBeenCalledWith({
+        format: "json",
+        projectId: "project-1",
+        dateFrom: undefined,
+        dateTo: undefined,
+        minConfidence: 80,
+        status: "approved",
+      });
+    });
   });
 
-  it("shows error toast when export clicked without format", async () => {
-    const { toast } = await import("sonner");
+  it("downloads completed exports only", async () => {
     const user = userEvent.setup();
     render(<ExportCenter />);
 
-    await user.click(screen.getByText("Generate Export"));
-    expect(toast.error).toHaveBeenCalledWith("Please choose an export format first.");
+    const buttons = screen.getAllByRole("button", { name: /download/i });
+    expect(buttons[0]).toBeEnabled();
+    expect(buttons[1]).toBeDisabled();
+
+    await user.click(buttons[0]);
+
+    expect(downloadExportMutate).toHaveBeenCalledWith("export-1");
   });
 });

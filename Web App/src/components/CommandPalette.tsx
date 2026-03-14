@@ -28,6 +28,7 @@ import {
   Keyboard,
 } from "lucide-react";
 import { useSearch } from "@/hooks/use-api";
+import type { SearchResultItem } from "@/lib/api-types";
 
 const navigationItems = [
   { label: "Dashboard", icon: LayoutDashboard, path: "/" },
@@ -82,14 +83,16 @@ export function CommandPalette({ onOpenShortcuts }: CommandPaletteProps) {
   const { data: searchResults } = useSearch(query);
   const results = searchResults ?? [];
 
-  const matchedDocuments = results.filter((r: any) => r.type === 'document').slice(0, 3);
-  const matchedJobs = results.filter((r: any) => r.type === 'job').slice(0, 3);
-  const matchedProjects = results.filter((r: any) => r.type === 'project').slice(0, 3);
-  const matchedMcqs = results.filter((r: any) => r.type === 'mcq').slice(0, 3);
-  const matchedReview = results.filter((r: any) => r.type === 'review').slice(0, 3);
-  const matchedUsers = results.filter((r: any) => r.type === 'user').slice(0, 3);
+  const matchedDocuments = results.filter((result) => result.type === "document").slice(0, 3);
+  const matchedJobs = results.filter((result) => result.type === "job").slice(0, 3);
+  const matchedProjects = results.filter((result) => result.type === "project").slice(0, 3);
+  const matchedMcqs = results.filter((result) => result.type === "mcq").slice(0, 3);
+  const matchedReview = results.filter((result) => result.type === "review").slice(0, 3);
+  const matchedUsers = results.filter((result) => result.type === "user").slice(0, 3);
 
   const hasEntityResults = results.length > 0;
+
+  const renderResultLabel = (item: SearchResultItem) => item.name;
 
   return (
     <CommandDialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) setSearch(""); }}>
@@ -117,10 +120,10 @@ export function CommandPalette({ onOpenShortcuts }: CommandPaletteProps) {
             <CommandSeparator />
             {matchedDocuments.length > 0 && (
               <CommandGroup heading="Documents">
-                {matchedDocuments.map((doc: any) => (
+                {matchedDocuments.map((doc) => (
                   <CommandItem key={doc.id} onSelect={() => handleSelect("/documents")}>
                     <FileText className="mr-2 h-4 w-4 text-muted-foreground" />
-                    <span className="flex-1 truncate">{doc.name || doc.filename}</span>
+                    <span className="flex-1 truncate">{renderResultLabel(doc)}</span>
                     <span className="text-[10px] text-muted-foreground ml-2">{doc.status}</span>
                   </CommandItem>
                 ))}
@@ -128,55 +131,55 @@ export function CommandPalette({ onOpenShortcuts }: CommandPaletteProps) {
             )}
             {matchedProjects.length > 0 && (
               <CommandGroup heading="Projects">
-                {matchedProjects.map((p: any) => (
-                  <CommandItem key={p.id} onSelect={() => handleSelect("/projects")}>
+                {matchedProjects.map((project) => (
+                  <CommandItem key={project.id} onSelect={() => handleSelect("/projects")}>
                     <FolderKanban className="mr-2 h-4 w-4 text-muted-foreground" />
-                    <span className="flex-1 truncate">{p.name}</span>
-                    <span className="text-[10px] text-muted-foreground ml-2">{p.status}</span>
+                    <span className="flex-1 truncate">{renderResultLabel(project)}</span>
+                    <span className="text-[10px] text-muted-foreground ml-2">{project.status}</span>
                   </CommandItem>
                 ))}
               </CommandGroup>
             )}
             {matchedJobs.length > 0 && (
               <CommandGroup heading="Jobs">
-                {matchedJobs.map((j: any) => (
-                  <CommandItem key={j.id} onSelect={() => handleSelect("/jobs")}>
+                {matchedJobs.map((job) => (
+                  <CommandItem key={job.id} onSelect={() => handleSelect("/jobs")}>
                     <Briefcase className="mr-2 h-4 w-4 text-muted-foreground" />
-                    <span className="flex-1 truncate">{j.name || j.documentName}</span>
-                    <span className="text-[10px] text-muted-foreground ml-2">{j.status}</span>
+                    <span className="flex-1 truncate">{renderResultLabel(job)}</span>
+                    <span className="text-[10px] text-muted-foreground ml-2">{job.status}</span>
                   </CommandItem>
                 ))}
               </CommandGroup>
             )}
             {matchedMcqs.length > 0 && (
               <CommandGroup heading="MCQs">
-                {matchedMcqs.map((m: any) => (
-                  <CommandItem key={m.id} onSelect={() => handleSelect("/mcq-records")}>
+                {matchedMcqs.map((mcq) => (
+                  <CommandItem key={mcq.id} onSelect={() => handleSelect("/mcq-records")}>
                     <BookOpen className="mr-2 h-4 w-4 text-muted-foreground" />
-                    <span className="flex-1 truncate text-xs">{m.name || m.question}</span>
-                    <span className="text-[10px] text-muted-foreground ml-2">{m.confidence}%</span>
+                    <span className="flex-1 truncate text-xs">{renderResultLabel(mcq)}</span>
+                    <span className="text-[10px] text-muted-foreground ml-2">{mcq.status}</span>
                   </CommandItem>
                 ))}
               </CommandGroup>
             )}
             {matchedReview.length > 0 && (
               <CommandGroup heading="Review Queue">
-                {matchedReview.map((r: any) => (
-                  <CommandItem key={r.id} onSelect={() => handleSelect(`/review/${r.id}`)}>
+                {matchedReview.map((review) => (
+                  <CommandItem key={review.id} onSelect={() => handleSelect(`/review/${review.id}`)}>
                     <ClipboardCheck className="mr-2 h-4 w-4 text-muted-foreground" />
-                    <span className="flex-1 truncate text-xs">{r.name || r.question}</span>
-                    <span className="text-[10px] text-muted-foreground ml-2">{r.status}</span>
+                    <span className="flex-1 truncate text-xs">{renderResultLabel(review)}</span>
+                    <span className="text-[10px] text-muted-foreground ml-2">{review.status}</span>
                   </CommandItem>
                 ))}
               </CommandGroup>
             )}
             {matchedUsers.length > 0 && (
               <CommandGroup heading="Users">
-                {matchedUsers.map((u: any) => (
-                  <CommandItem key={u.id} onSelect={() => handleSelect("/users")}>
+                {matchedUsers.map((user) => (
+                  <CommandItem key={user.id} onSelect={() => handleSelect("/users")}>
                     <Users className="mr-2 h-4 w-4 text-muted-foreground" />
-                    <span className="flex-1 truncate">{u.name}</span>
-                    <span className="text-[10px] text-muted-foreground ml-2">{u.role}</span>
+                    <span className="flex-1 truncate">{renderResultLabel(user)}</span>
+                    <span className="text-[10px] text-muted-foreground ml-2">{user.status}</span>
                   </CommandItem>
                 ))}
               </CommandGroup>

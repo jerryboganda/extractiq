@@ -6,9 +6,8 @@ import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/componen
 import { PdfViewerPanel } from "@/components/review/PdfViewerPanel";
 import { McqEditorPanel } from "@/components/review/McqEditorPanel";
 import { ReviewActionBar } from "@/components/review/ReviewActionBar";
-import { useReviewDetail, useReviewNavigation } from "@/hooks/use-api";
+import { useReviewDetail, useReviewNavigation, useApproveReview, useRejectReview, useFlagReview } from "@/hooks/use-api";
 import { ArrowLeft, ChevronLeft, ChevronRight } from "lucide-react";
-import { toast } from "sonner";
 import { useIsMobile } from "@/hooks/use-mobile";
 
 const statusStyles: Record<string, string> = {
@@ -16,6 +15,7 @@ const statusStyles: Record<string, string> = {
   approved: "bg-success/10 text-success border-success/20",
   rejected: "bg-destructive/10 text-destructive border-destructive/20",
   flagged: "bg-warning/10 text-warning border-warning/20",
+  edited: "bg-primary/10 text-primary border-primary/20",
 };
 
 export default function ReviewDetail() {
@@ -23,35 +23,52 @@ export default function ReviewDetail() {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
 
-  const { data: detail } = useReviewDetail(id || '');
-  const { data: navigation } = useReviewNavigation(id || '');
+  const { data: detail } = useReviewDetail(id || "");
+  const { data: navigation } = useReviewNavigation(id || "");
+  const approveReview = useApproveReview();
+  const rejectReview = useRejectReview();
+  const flagReview = useFlagReview();
 
   const reviewIds = navigation?.ids ?? [];
-  const currentIndex = id ? reviewIds.indexOf(id) : -1;
-  const hasPrev = currentIndex > 0;
-  const hasNext = currentIndex < reviewIds.length - 1;
+  const currentIndex = typeof navigation?.currentIndex === "number"
+    ? navigation.currentIndex - 1
+    : (id ? reviewIds.indexOf(id) : -1);
+  const hasPrev = navigation?.hasPrevious ?? currentIndex > 0;
+  const hasNext = navigation?.hasNext ?? currentIndex < reviewIds.length - 1;
 
   const goTo = useCallback((direction: "prev" | "next") => {
-    const nextIndex = direction === "prev" ? currentIndex - 1 : currentIndex + 1;
-    if (nextIndex >= 0 && nextIndex < reviewIds.length) {
-      navigate(`/review/${reviewIds[nextIndex]}`);
+    const targetId = direction === "prev" ? navigation?.previousId : navigation?.nextId;
+    if (targetId) {
+      navigate(`/review/${targetId}`);
     }
-  }, [currentIndex, navigate, reviewIds]);
+  }, [navigate, navigation?.nextId, navigation?.previousId]);
 
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-      switch (e.key.toLowerCase()) {
-        case "a": toast("✅ MCQ approved successfully"); break;
-        case "r": toast("❌ MCQ rejected"); break;
-        case "f": toast("🚩 MCQ flagged for review"); break;
-        case "arrowleft": hasPrev && goTo("prev"); break;
-        case "arrowright": hasNext && goTo("next"); break;
+    const handler = (event: KeyboardEvent) => {
+      if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
+
+      switch (event.key.toLowerCase()) {
+        case "a":
+          approveReview.mutate({ id: id || "" });
+          break;
+        case "r":
+          rejectReview.mutate({ id: id || "", reason: "Rejected from detail view" });
+          break;
+        case "f":
+          flagReview.mutate({ id: id || "", reason: "Flagged from detail view" });
+          break;
+        case "arrowleft":
+          if (hasPrev) goTo("prev");
+          break;
+        case "arrowright":
+          if (hasNext) goTo("next");
+          break;
       }
     };
+
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [hasPrev, hasNext, goTo]);
+  }, [approveReview, flagReview, goTo, hasNext, hasPrev, id, rejectReview]);
 
   if (!detail) {
     return (
@@ -63,7 +80,6 @@ export default function ReviewDetail() {
 
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)]">
-      {/* Header */}
       <div className="flex items-center gap-3 px-4 sm:px-6 py-3 border-b border-border/50 bg-background/80 backdrop-blur-md">
         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => navigate("/review")} aria-label="Back to review queue">
           <ArrowLeft className="h-4 w-4" />
@@ -71,12 +87,12 @@ export default function ReviewDetail() {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <h1 className="text-sm font-semibold truncate">{detail.document}</h1>
-            <Badge className={`text-[10px] px-1.5 py-0 ${statusStyles[detail.status]}`}>
+            <Badge className={`text-[10px] px-1.5 py-0 ${statusStyles[detail.status] ?? statusStyles.pending}`}>
               {detail.status}
             </Badge>
           </div>
           <p className="text-xs text-muted-foreground truncate mt-0.5">
-            Question {currentIndex + 1} of {reviewIds.length}
+            Question {(navigation?.currentIndex ?? currentIndex + 1) || 1} of {navigation?.totalCount ?? reviewIds.length}
           </p>
         </div>
         <div className="flex items-center gap-1">
@@ -89,7 +105,6 @@ export default function ReviewDetail() {
         </div>
       </div>
 
-      {/* Split pane — vertical on mobile, horizontal on desktop */}
       <div className="flex-1 overflow-hidden">
         <ResizablePanelGroup direction={isMobile ? "vertical" : "horizontal"}>
           <ResizablePanel defaultSize={isMobile ? 40 : 45} minSize={25}>
@@ -116,8 +131,12 @@ export default function ReviewDetail() {
         </ResizablePanelGroup>
       </div>
 
-      {/* Action bar */}
-      <ReviewActionBar onNavigate={goTo} />
+      <ReviewActionBar
+        onNavigate={goTo}
+        onApprove={() => approveReview.mutate({ id: id || "" })}
+        onReject={() => rejectReview.mutate({ id: id || "", reason: "Rejected from detail view" })}
+        onFlag={() => flagReview.mutate({ id: id || "", reason: "Flagged from detail view" })}
+      />
     </div>
   );
 }

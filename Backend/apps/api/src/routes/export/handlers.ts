@@ -5,9 +5,19 @@ import { getPresignedDownloadUrl } from '@mcq-platform/storage';
 import { enqueue, QUEUE_NAMES, type ExportGenerationPayload } from '@mcq-platform/queue';
 import { AppError } from '../../middleware/error-handler.js';
 
+function parsePagination(query: Request['query']) {
+  const page = Number.parseInt(String(query.page ?? '1'), 10);
+  const limit = Number.parseInt(String(query.limit ?? '20'), 10);
+
+  return {
+    page: Number.isFinite(page) && page > 0 ? page : 1,
+    limit: Number.isFinite(limit) && limit > 0 && limit <= 100 ? limit : 20,
+  };
+}
+
 export async function list(req: Request, res: Response, next: NextFunction) {
   try {
-    const { page, limit } = req.query as unknown as { page: number; limit: number };
+    const { page, limit } = parsePagination(req.query);
     const offset = (page - 1) * limit;
 
     const items = await db

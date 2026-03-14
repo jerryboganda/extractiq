@@ -1,109 +1,107 @@
 # Environment Variables Reference
 
-> Auto-generated reference — see `Backend/packages/config/src/index.ts` (Zod schema) for authoritative validation.
+`Backend/packages/config/src/index.ts` is the authoritative validator for backend runtime configuration. This document reflects the current production surface and the root deployment files: [docker-compose.local.yml](/Users/Admin/Desktop/MCQ Platform/docker-compose.local.yml) and [docker-compose.prod.yml](/Users/Admin/Desktop/MCQ Platform/docker-compose.prod.yml).
 
-## Required (no defaults — app will not start without these)
+## Runtime baseline
+
+- Supported Node.js baseline for CI and production: `20.x`
+- Local developer helpers: [.nvmrc](/Users/Admin/Desktop/MCQ Platform/.nvmrc), [.node-version](/Users/Admin/Desktop/MCQ Platform/.node-version)
+
+## Required secrets
 
 | Variable | Description | Example |
 |---|---|---|
 | `DATABASE_URL` | PostgreSQL connection string | `postgresql://mcq_user:mcq_password@localhost:5432/mcq_platform` |
-| `JWT_SECRET` | JWT signing secret (min 32 chars, 64+ recommended) | `<random 64-char string>` |
-| `ENCRYPTION_KEY` | AES encryption key for provider API keys (min 32 chars) | `<random 32-byte hex string>` |
+| `JWT_SECRET` | JWT signing secret, minimum 32 characters | `<64-char random secret>` |
+| `ENCRYPTION_KEY` | Provider secret encryption key, minimum 32 characters | `<32+ char random secret>` |
+| `S3_ACCESS_KEY` | S3/MinIO access key | `minioadmin` |
+| `S3_SECRET_KEY` | S3/MinIO secret key | `minioadmin` |
 
-## Application
-
-| Variable | Default | Description |
-|---|---|---|
-| `NODE_ENV` | `development` | `development` / `production` / `test` |
-| `LOG_LEVEL` | `info` | `error` / `warn` / `info` / `debug` |
-
-## API Server
+## Application and routing
 
 | Variable | Default | Description |
 |---|---|---|
-| `API_PORT` | `4000` | HTTP listen port |
-| `API_HOST` | `0.0.0.0` | Bind address |
-| `CORS_ORIGIN` | `http://localhost:8080` | Allowed CORS origin |
+| `NODE_ENV` | `development` | `development`, `production`, or `test` |
+| `LOG_LEVEL` | `info` | `error`, `warn`, `info`, or `debug` |
+| `API_HOST` | `0.0.0.0` | API bind host |
+| `API_PORT` | `4000` | API bind port |
+| `CORS_ORIGIN` | `http://localhost:8080` | Browser origin allowed to call the API |
+| `APP_BASE_URL` | `http://localhost:8080/app` | Operator app base URL used for invite links and deep links |
 
-## Database (PostgreSQL)
-
-| Variable | Default | Description |
-|---|---|---|
-| `DATABASE_URL` | *(required)* | Full connection string |
-| `DB_POOL_MIN` | `2` | Minimum pool connections |
-| `DB_POOL_MAX` | `10` | Maximum pool connections |
-
-## Redis
+## Database and queues
 
 | Variable | Default | Description |
 |---|---|---|
-| `REDIS_URL` | `redis://localhost:6379` | Redis connection string (used for BullMQ queues) |
+| `DATABASE_URL` | required | PostgreSQL connection string |
+| `DB_POOL_MIN` | `2` | Minimum DB pool size |
+| `DB_POOL_MAX` | `10` | Maximum DB pool size |
+| `REDIS_URL` | `redis://localhost:6379` | Redis URL used by BullMQ |
 
-## Object Storage (MinIO / S3)
+## Object storage
 
 | Variable | Default | Description |
 |---|---|---|
-| `S3_ENDPOINT` | `http://localhost:9000` | S3-compatible endpoint |
-| `S3_ACCESS_KEY` | `minioadmin` | Access key |
-| `S3_SECRET_KEY` | `minioadmin` | Secret key |
+| `S3_ENDPOINT` | `http://localhost:9000` | Internal S3-compatible endpoint for API/worker access |
+| `S3_PUBLIC_ENDPOINT` | `http://localhost:9000` | Browser-safe endpoint used in presigned URLs |
 | `S3_BUCKET` | `mcq-platform` | Bucket name |
-| `S3_REGION` | `us-east-1` | AWS region |
-| `S3_FORCE_PATH_STYLE` | `true` | Use path-style addressing (required for MinIO) |
+| `S3_REGION` | `us-east-1` | AWS region label |
+| `S3_FORCE_PATH_STYLE` | `true` | Required for MinIO path-style addressing |
 
-## Authentication
+`S3_PUBLIC_ENDPOINT` should point at a host that browser clients can actually reach. In local compose that is `http://localhost:9000`, while API and worker containers still use `http://minio:9000`.
 
-| Variable | Default | Description |
-|---|---|---|
-| `JWT_SECRET` | *(required)* | JWT signing secret |
-| `JWT_EXPIRY` | `24h` | Access token TTL |
-| `BCRYPT_ROUNDS` | `12` | bcrypt cost factor |
-
-## Encryption
+## Authentication and passwords
 
 | Variable | Default | Description |
 |---|---|---|
-| `ENCRYPTION_KEY` | *(required)* | AES key for encrypting provider API keys at rest |
+| `JWT_EXPIRY` | `24h` | Access-token TTL |
+| `BCRYPT_ROUNDS` | `12` | Password hash cost |
 
-## AI Provider API Keys (all optional)
+## Email delivery
 
-| Variable | Description |
+| Variable | Default | Description |
+|---|---|---|
+| `SMTP_HOST` | `127.0.0.1` | SMTP host used by notification delivery |
+| `SMTP_PORT` | `1025` | SMTP port |
+| `SMTP_USER` | empty | SMTP username, if required |
+| `SMTP_PASS` | empty | SMTP password, if required |
+| `SMTP_SECURE` | `false` | Use SMTPS/TLS transport |
+| `SMTP_FROM_NAME` | `ExtractIQ Document Intelligence` | Display name shown in the inbox sender header |
+| `SMTP_FROM` | `noreply@extractiq.local` | Default sender address |
+| `SALES_NOTIFICATION_EMAIL` | `sales@extractiq.local` | Recipient for website demo requests |
+| `SUPPORT_NOTIFICATION_EMAIL` | `support@extractiq.local` | Recipient for website contact requests |
+| `ENABLE_EMAIL_DELIVERY` | `true` | Skip actual email sends when `false` |
+
+Brevo is the default SMTP provider for all email-based flows in this project:
+
+| Variable | Brevo value |
 |---|---|
-| `OPENAI_API_KEY` | OpenAI API key |
-| `ANTHROPIC_API_KEY` | Anthropic API key |
-| `GOOGLE_AI_API_KEY` | Google AI API key |
-| `MISTRAL_API_KEY` | Mistral API key |
-| `QWEN_VL_ENDPOINT` | Qwen-VL endpoint URL |
-| `QWEN_VL_API_KEY` | Qwen-VL API key |
-| `GLM_OCR_ENDPOINT` | GLM-OCR endpoint URL |
-| `GLM_OCR_API_KEY` | GLM-OCR API key |
+| `SMTP_HOST` | `smtp-relay.brevo.com` |
+| `SMTP_PORT` | `587` |
+| `SMTP_SECURE` | `false` |
 
-## Rate Limiting
+Set `SMTP_USER` to the Brevo SMTP login and `SMTP_PASS` to the Brevo SMTP key for the target environment. Local compose uses the same SMTP configuration as the rest of the stack; it no longer swaps in a separate sandbox mail server automatically.
 
-| Variable | Default | Description |
-|---|---|---|
-| `RATE_LIMIT_AUTH_MAX` | `5` | Max auth attempts per window |
-| `RATE_LIMIT_AUTH_WINDOW_MS` | `60000` | Auth rate limit window (ms) |
-| `RATE_LIMIT_API_MAX` | `100` | Max API requests per window |
-| `RATE_LIMIT_API_WINDOW_MS` | `60000` | API rate limit window (ms) |
+## AI provider keys
 
-## File Upload
+All provider keys remain optional and can be configured later through the operator UI:
+
+`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_AI_API_KEY`, `MISTRAL_API_KEY`, `QWEN_VL_ENDPOINT`, `QWEN_VL_API_KEY`, `GLM_OCR_ENDPOINT`, `GLM_OCR_API_KEY`
+
+## File handling and throttling
 
 | Variable | Default | Description |
 |---|---|---|
-| `MAX_FILE_SIZE_MB` | `50` | Maximum upload file size in MB |
-| `PRESIGNED_UPLOAD_TTL_SECONDS` | `900` | Upload presigned URL TTL (15 min) |
-| `PRESIGNED_DOWNLOAD_TTL_SECONDS` | `3600` | Download presigned URL TTL (1 hour) |
+| `MAX_FILE_SIZE_MB` | `50` | Maximum accepted upload size |
+| `PRESIGNED_UPLOAD_TTL_SECONDS` | `900` | Upload URL TTL |
+| `PRESIGNED_DOWNLOAD_TTL_SECONDS` | `3600` | Download URL TTL |
+| `RATE_LIMIT_AUTH_MAX` | `5` | Authentication request cap per window |
+| `RATE_LIMIT_AUTH_WINDOW_MS` | `60000` | Auth rate-limit window |
+| `RATE_LIMIT_API_MAX` | `100` | General API request cap per window |
+| `RATE_LIMIT_API_WINDOW_MS` | `60000` | General API rate-limit window |
 
-## Docker Compose Infrastructure Defaults
+## Deployment sources of truth
 
-The `Backend/docker-compose.yml` sets these for local development:
-
-| Service | Variable | Value |
-|---|---|---|
-| PostgreSQL | `POSTGRES_USER` | `mcq_user` |
-| PostgreSQL | `POSTGRES_PASSWORD` | `mcq_password` |
-| PostgreSQL | `POSTGRES_DB` | `mcq_platform` |
-| MinIO | `MINIO_ROOT_USER` | `minioadmin` |
-| MinIO | `MINIO_ROOT_PASSWORD` | `minioadmin` |
-
-These match the defaults in `.env.example`.
+- Use [docker-compose.local.yml](/Users/Admin/Desktop/MCQ Platform/docker-compose.local.yml) for local verification.
+- Use [docker-compose.prod.yml](/Users/Admin/Desktop/MCQ Platform/docker-compose.prod.yml) for production deployment.
+- Use [docker-compose.prod.proxy.yml](/Users/Admin/Desktop/MCQ Platform/docker-compose.prod.proxy.yml) only when you need to join an existing reverse proxy network such as Nginx Proxy Manager.
+- [Backend/docker-compose.yml](/Users/Admin/Desktop/MCQ Platform/Backend/docker-compose.yml) is backend-only infrastructure bootstrap and should not be treated as the primary full-stack deployment file.

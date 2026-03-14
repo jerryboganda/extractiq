@@ -1,0 +1,19 @@
+services:
+  api:
+    networks:
+      - extractiq
+      - reverse_proxy
+
+  worker:
+    networks:
+      - extractiq
+
+  frontend:
+    networks:
+      - extractiq
+      - reverse_proxy
+
+networks:
+  reverse_proxy:
+    external: true
+    name: nginx-proxy-manager_default

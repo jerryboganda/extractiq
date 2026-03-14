@@ -1,30 +1,8 @@
 import type { Request, Response, NextFunction } from 'express';
 import { eq, and, desc } from 'drizzle-orm';
 import { db, providerConfigs, providerBenchmarks } from '@mcq-platform/db';
-import { env } from '@mcq-platform/config';
+import { decryptProviderSecret, encryptProviderSecret } from '@mcq-platform/auth';
 import { AppError } from '../../middleware/error-handler.js';
-import crypto from 'node:crypto';
-
-// Simple AES-256-GCM encryption for API keys at rest
-function encryptApiKey(plaintext: string): string {
-  const key = Buffer.from(env.ENCRYPTION_KEY, 'hex');
-  const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
-  const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
-  const tag = cipher.getAuthTag();
-  return Buffer.concat([iv, tag, encrypted]).toString('base64');
-}
-
-function decryptApiKey(ciphertext: string): string {
-  const key = Buffer.from(env.ENCRYPTION_KEY, 'hex');
-  const buf = Buffer.from(ciphertext, 'base64');
-  const iv = buf.subarray(0, 12);
-  const tag = buf.subarray(12, 28);
-  const encrypted = buf.subarray(28);
-  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
-  decipher.setAuthTag(tag);
-  return decipher.update(encrypted) + decipher.final('utf8');
-}
 
 export async function list(req: Request, res: Response, next: NextFunction) {
   try {
@@ -77,7 +55,7 @@ export async function create(req: Request, res: Response, next: NextFunction) {
   try {
     const { displayName, category, providerType, apiKey, models, config } = req.body;
 
-    const encryptedKey = encryptApiKey(apiKey);
+    const encryptedKey = encryptProviderSecret(apiKey);
 
     const [provider] = await db
       .insert(providerConfigs)
@@ -146,7 +124,7 @@ export async function update(req: Request, res: Response, next: NextFunction) {
     if (req.body.models) updates.models = req.body.models;
     if (req.body.config) updates.config = req.body.config;
     if (typeof req.body.isEnabled === 'boolean') updates.isEnabled = req.body.isEnabled;
-    if (req.body.apiKey) updates.apiKeyEncrypted = encryptApiKey(req.body.apiKey);
+    if (req.body.apiKey) updates.apiKeyEncrypted = encryptProviderSecret(req.body.apiKey);
 
     const [provider] = await db
       .update(providerConfigs)
@@ -190,7 +168,7 @@ export async function test(req: Request, res: Response, next: NextFunction) {
     if (!provider) throw new AppError(404, 'NOT_FOUND', 'Provider not found');
 
     // Decrypt API key and test connectivity
-    const apiKey = decryptApiKey(provider.apiKeyEncrypted);
+    const apiKey = decryptProviderSecret(provider.apiKeyEncrypted);
     const start = Date.now();
 
     // Simple connectivity test — varies by provider
@@ -203,7 +181,7 @@ export async function test(req: Request, res: Response, next: NextFunction) {
     }
 
     const latency = Date.now() - start;
-    const newStatus = healthy ? 'healthy' : 'degraded';
+    const newStatus = healthy ? 'healthy' : 'offline';
 
     await db
       .update(providerConfigs)

@@ -2,11 +2,11 @@ import type { Job } from 'bullmq';
 import type { VlmExtractionPayload, McqExtractionPayload } from '@mcq-platform/queue';
 import { enqueue, QUEUE_NAMES } from '@mcq-platform/queue';
 import { db, vlmOutputs, providerConfigs, jobTasks } from '@mcq-platform/db';
+import { decryptProviderSecret } from '@mcq-platform/auth';
 import { download } from '@mcq-platform/storage';
 import { createLogger } from '@mcq-platform/logger';
 import { env } from '@mcq-platform/config';
 import { eq } from 'drizzle-orm';
-import crypto from 'node:crypto';
 
 const logger = createLogger('worker:vlm-extraction');
 
@@ -42,7 +42,7 @@ export async function processVlmExtraction(job: Job<VlmExtractionPayload>) {
   const imageBuffer = Buffer.concat(chunks);
   const base64Image = imageBuffer.toString('base64');
 
-  const apiKey = decryptApiKey(provider.apiKeyEncrypted);
+  const apiKey = decryptProviderSecret(provider.apiKeyEncrypted);
 
   let rawOutput: Record<string, unknown> = {};
   let extractedMcqs: unknown[] = [];
@@ -61,7 +61,7 @@ export async function processVlmExtraction(job: Job<VlmExtractionPayload>) {
         base64Image,
       ));
       break;
-    case 'google_gemini':
+    case 'google':
       ({ rawOutput, extractedMcqs, confidence, costUsd } = await callGeminiVision(
         apiKey,
         base64Image,
@@ -308,28 +308,8 @@ function estimateCost(provider: string, tokens: number): number {
   // Approximate per-token costs (USD)
   const rates: Record<string, number> = {
     openai_gpt4o: 0.000010,    // ~$10 / 1M tokens (blended)
-    google_gemini: 0.0000025,   // ~$2.5 / 1M tokens
+    google: 0.0000025,   // ~$2.5 / 1M tokens
     qwen_vl: 0.000002,          // ~$2 / 1M tokens (self-hosted, compute cost)
   };
   return tokens * (rates[provider] ?? 0.000005);
-}
-
-function decryptApiKey(encrypted: string): string {
-  const [ivHex, authTagHex, cipherTextHex] = encrypted.split(':');
-  if (!ivHex || !authTagHex || !cipherTextHex) {
-    throw new Error('Invalid encrypted API key format');
-  }
-
-  const key = Buffer.from(env.ENCRYPTION_KEY, 'hex');
-  const iv = Buffer.from(ivHex, 'hex');
-  const authTag = Buffer.from(authTagHex, 'hex');
-  const cipherText = Buffer.from(cipherTextHex, 'hex');
-
-  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
-  decipher.setAuthTag(authTag);
-
-  let decrypted = decipher.update(cipherText, undefined, 'utf8');
-  decrypted += decipher.final('utf8');
-
-  return decrypted;
 }

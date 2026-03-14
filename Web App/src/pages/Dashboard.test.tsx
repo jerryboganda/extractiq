@@ -28,6 +28,12 @@ vi.mock("@/hooks/use-api", () => ({
   useDashboardSparklines: () => ({ data: null }),
 }));
 
+vi.mock("@/contexts/AuthContext", () => ({
+  useAuth: () => ({
+    user: { id: "user-1", name: "Test User" },
+  }),
+}));
+
 // Stub complex child components to keep tests focused
 vi.mock("@/components/dashboard/WelcomeBanner", () => ({
   WelcomeBanner: () => <div data-testid="welcome-banner" />,

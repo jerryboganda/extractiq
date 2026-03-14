@@ -1,25 +1,28 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Upload, CheckCircle2, BookOpen, Download, X } from "lucide-react";
+import type { DashboardStats } from "@/lib/api-types";
 
 const DISMISS_KEY = "mcq_welcome_dismissed";
 
-const steps = [
-  { label: "Upload first document", icon: Upload, href: "/upload", done: true },
-  { label: "Review extraction", icon: BookOpen, href: "/review", done: false },
-  { label: "Export results", icon: Download, href: "/export", done: false },
-];
-
-export function WelcomeBanner() {
+export function WelcomeBanner({ userName, stats }: { userName?: string | null; stats?: DashboardStats }) {
   const [dismissed, setDismissed] = useState(() => localStorage.getItem(DISMISS_KEY) === "true");
   const navigate = useNavigate();
 
+  const steps = useMemo(() => ([
+    { label: "Upload first document", icon: Upload, href: "/upload", done: (stats?.documentsProcessed ?? 0) > 0 },
+    { label: "Review extraction", icon: BookOpen, href: "/review", done: (stats?.mcqsExtracted ?? 0) > 0 },
+    { label: "Export results", icon: Download, href: "/export", done: (stats?.approvalRate ?? 0) > 0 },
+  ]), [stats]);
+
   if (dismissed) return null;
 
-  const completedCount = steps.filter((s) => s.done).length;
+  const completedCount = steps.filter((step) => step.done).length;
+
+  if (completedCount >= steps.length) return null;
 
   return (
     <AnimatePresence>
@@ -34,9 +37,9 @@ export function WelcomeBanner() {
           <CardContent className="relative p-5">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
               <div className="flex-1 min-w-0">
-                <h2 className="text-base font-semibold">Welcome back, Dr. Chen</h2>
+                <h2 className="text-base font-semibold">Welcome back{userName ? `, ${userName}` : ""}</h2>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  Complete these steps to get the most out of your workspace — {completedCount}/{steps.length} done
+                  Complete these real setup steps to get your workspace ready — {completedCount}/{steps.length} done
                 </p>
                 <div className="flex flex-wrap items-center gap-3 mt-3">
                   {steps.map((step) => (

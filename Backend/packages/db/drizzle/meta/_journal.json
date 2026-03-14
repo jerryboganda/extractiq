@@ -8,6 +8,13 @@
       "when": 1773234843712,
       "tag": "0000_magical_adam_destine",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1773403200000,
+      "tag": "0001_workflow_hardening",
+      "breakpoints": true
     }
   ]
 }

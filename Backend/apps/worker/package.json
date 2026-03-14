@@ -10,21 +10,23 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "bullmq": "^5.30.0",
-    "ioredis": "^5.4.0",
-    "openai": "^4.70.0",
     "@anthropic-ai/sdk": "^0.32.0",
     "@google/generative-ai": "^0.21.0",
-    "pdf-parse": "^1.1.1",
-    "sharp": "^0.33.0",
     "@mcq-platform/config": "*",
-    "@mcq-platform/logger": "*",
-    "@mcq-platform/shared-types": "*",
     "@mcq-platform/db": "*",
+    "@mcq-platform/logger": "*",
+    "@mcq-platform/queue": "*",
+    "@mcq-platform/shared-types": "*",
     "@mcq-platform/storage": "*",
-    "@mcq-platform/queue": "*"
+    "bullmq": "^5.30.0",
+    "ioredis": "^5.4.0",
+    "nodemailer": "^6.10.1",
+    "openai": "^4.70.0",
+    "pdf-parse": "^1.1.1",
+    "sharp": "^0.33.0"
   },
   "devDependencies": {
+    "@types/nodemailer": "^7.0.11",
     "@types/pdf-parse": "^1.1.4",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0"

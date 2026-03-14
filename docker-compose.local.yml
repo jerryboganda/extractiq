@@ -1,0 +1,187 @@
+# ─── ExtractIQ Local Docker Compose ───
+# Usage: docker compose -f docker-compose.local.yml up -d --build
+
+services:
+  # ── Infrastructure ──
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: extractiq-local-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: mcq_user
+      POSTGRES_PASSWORD: mcq_password
+      POSTGRES_DB: mcq_platform
+    volumes:
+      - local_pgdata:/var/lib/postgresql/data
+      - ./Backend/scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mcq_user -d mcq_platform"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - extractiq-local
+
+  redis:
+    image: redis:7-alpine
+    container_name: extractiq-local-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - local_redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - extractiq-local
+
+  minio:
+    image: minio/minio:latest
+    container_name: extractiq-local-minio
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - local_miniodata:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - extractiq-local
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: extractiq-local-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    restart: "no"
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set extractiq http://minio:9000 minioadmin minioadmin;
+      mc mb extractiq/mcq-platform --ignore-existing;
+      cat <<'EOF' >/tmp/minio-cors.json
+      [
+        {
+          \"AllowedOrigins\": [\"http://localhost:8080\"],
+          \"AllowedMethods\": [\"GET\", \"PUT\", \"POST\", \"HEAD\"],
+          \"AllowedHeaders\": [\"*\"],
+          \"ExposeHeaders\": [\"ETag\"],
+          \"MaxAgeSeconds\": 3000
+        }
+      ]
+      EOF
+      mc cors set extractiq/mcq-platform /tmp/minio-cors.json;
+      exit 0;
+      "
+    networks:
+      - extractiq-local
+
+  # ── Application ──
+  api:
+    build:
+      context: ./Backend
+      dockerfile: Dockerfile
+      target: api
+    container_name: extractiq-local-api
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    env_file: ./Backend/.env
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://mcq_user:mcq_password@postgres:5432/mcq_platform
+      REDIS_URL: redis://redis:6379
+      S3_ENDPOINT: http://minio:9000
+      S3_PUBLIC_ENDPOINT: http://localhost:9000
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+      CORS_ORIGIN: http://localhost:8080
+      APP_BASE_URL: http://localhost:8080/app
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4000/api/v1/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - extractiq-local
+
+  worker:
+    build:
+      context: ./Backend
+      dockerfile: Dockerfile
+      target: worker
+    container_name: extractiq-local-worker
+    restart: unless-stopped
+    env_file: ./Backend/.env
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://mcq_user:mcq_password@postgres:5432/mcq_platform
+      REDIS_URL: redis://redis:6379
+      S3_ENDPOINT: http://minio:9000
+      S3_PUBLIC_ENDPOINT: http://localhost:9000
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+    healthcheck:
+      test: ["CMD", "node", "-e", "process.exit(0)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - extractiq-local
+
+  # ── Frontend (Website + Web App) with API proxy ──
+  frontend:
+    build:
+      context: .
+      dockerfile: deploy/frontend.Dockerfile
+    container_name: extractiq-local-frontend
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      - ./deploy/frontend-nginx-local.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - extractiq-local
+
+volumes:
+  local_pgdata:
+  local_redisdata:
+  local_miniodata:
+
+networks:
+  extractiq-local:
+    name: extractiq-local
+    driver: bridge

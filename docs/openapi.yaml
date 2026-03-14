@@ -151,6 +151,18 @@ components:
           type: string
           minLength: 12
 
+    AcceptInvitationRequest:
+      type: object
+      required: [token, name, password]
+      properties:
+        token:
+          type: string
+        name:
+          type: string
+        password:
+          type: string
+          minLength: 12
+
     TokenPair:
       type: object
       properties:
@@ -236,6 +248,40 @@ components:
         s3Key:
           type: string
         checksumSha256:
+          type: string
+
+    PublicDemoRequest:
+      type: object
+      required: [firstName, lastName, email, company]
+      properties:
+        firstName:
+          type: string
+        lastName:
+          type: string
+        email:
+          type: string
+          format: email
+        company:
+          type: string
+        role:
+          type: string
+        monthlyVolume:
+          type: string
+        useCase:
+          type: string
+
+    PublicContactRequest:
+      type: object
+      required: [fullName, email, company]
+      properties:
+        fullName:
+          type: string
+        email:
+          type: string
+          format: email
+        company:
+          type: string
+        useCase:
           type: string
 
     DocumentResponse:
@@ -576,7 +622,7 @@ paths:
   /health/ready:
     get:
       tags: [Health]
-      summary: Readiness check (DB, Redis, S3)
+      summary: Readiness check (DB, Redis, queue, storage, email)
       operationId: getReadiness
       responses:
         '200':
@@ -598,8 +644,16 @@ paths:
                         type: string
                       redis:
                         type: string
+                      queue:
+                        type: string
                       storage:
                         type: string
+                      email:
+                        type: string
+                  reasons:
+                    type: array
+                    items:
+                      type: string
 
   /health/metrics:
     get:
@@ -769,6 +823,82 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
+  /auth/invitations/{token}:
+    get:
+      tags: [Auth]
+      summary: Get invitation metadata by token
+      operationId: getInvitation
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Invitation metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      email:
+                        type: string
+                        format: email
+                      role:
+                        type: string
+                      workspaceId:
+                        type: string
+                        format: uuid
+                      workspaceName:
+                        type: string
+                      invitedName:
+                        type: string
+                      expiresAt:
+                        type: string
+                        format: date-time
+                      accepted:
+                        type: boolean
+                      expired:
+                        type: boolean
+                      status:
+                        type: string
+                        enum: [pending, accepted, expired]
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /auth/accept-invitation:
+    post:
+      tags: [Auth]
+      summary: Accept an invitation and create an authenticated session
+      operationId: acceptInvitation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AcceptInvitationRequest'
+      responses:
+        '200':
+          description: Invitation accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      user:
+                        $ref: '#/components/schemas/UserProfile'
+                      token:
+                        type: string
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /auth/me:
     get:
       tags: [Auth]
@@ -782,7 +912,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UserProfile'
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      user:
+                        $ref: '#/components/schemas/UserProfile'
         '401':
           $ref: '#/components/responses/Unauthorized'
 
@@ -1039,18 +1175,26 @@ paths:
             schema:
               $ref: '#/components/schemas/PresignUploadRequest'
       responses:
-        '200':
-          description: Presigned URL and upload ID
+        '201':
+          description: Presigned URL and document upload metadata
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  uploadUrl:
-                    type: string
-                    format: uri
-                  uploadId:
-                    type: string
+                  data:
+                    type: object
+                    properties:
+                      uploadUrl:
+                        type: string
+                        format: uri
+                      documentId:
+                        type: string
+                        format: uuid
+                      s3Key:
+                        type: string
+                      expiresIn:
+                        type: integer
         '401':
           $ref: '#/components/responses/Unauthorized'
 
@@ -1068,12 +1212,15 @@ paths:
             schema:
               $ref: '#/components/schemas/CompleteUploadRequest'
       responses:
-        '201':
-          description: Document created
+        '200':
+          description: Document upload completed
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DocumentResponse'
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/DocumentResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
 
@@ -1588,6 +1735,35 @@ paths:
       responses:
         '200':
           description: Navigation context (prev/next IDs)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      ids:
+                        type: array
+                        items:
+                          type: string
+                          format: uuid
+                      previousId:
+                        type: string
+                        format: uuid
+                        nullable: true
+                      nextId:
+                        type: string
+                        format: uuid
+                        nullable: true
+                      hasPrevious:
+                        type: boolean
+                      hasNext:
+                        type: boolean
+                      currentIndex:
+                        type: integer
+                      totalCount:
+                        type: integer
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -2039,14 +2215,23 @@ paths:
           content:
             application/json:
               schema:
-                allOf:
-                  - $ref: '#/components/schemas/PaginatedResponse'
-                  - type: object
+                type: object
+                properties:
+                  data:
+                    type: object
                     properties:
-                      data:
+                      items:
                         type: array
                         items:
                           $ref: '#/components/schemas/UserResponse'
+                      total:
+                        type: integer
+                      page:
+                        type: integer
+                      limit:
+                        type: integer
+                      totalPages:
+                        type: integer
         '401':
           $ref: '#/components/responses/Unauthorized'
 
@@ -2066,8 +2251,91 @@ paths:
       responses:
         '201':
           description: Invitation sent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      email:
+                        type: string
+                        format: email
+                      name:
+                        type: string
+                      role:
+                        type: string
+                      status:
+                        type: string
+                      invitationUrl:
+                        type: string
+                        format: uri
         '401':
           $ref: '#/components/responses/Unauthorized'
+
+  /public/demo-request:
+    post:
+      tags: [Public]
+      summary: Submit a public demo request
+      operationId: submitDemoRequest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PublicDemoRequest'
+      responses:
+        '201':
+          description: Demo request received
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      status:
+                        type: string
+                      message:
+                        type: string
+
+  /public/contact-request:
+    post:
+      tags: [Public]
+      summary: Submit a public contact request
+      operationId: submitContactRequest
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PublicContactRequest'
+      responses:
+        '201':
+          description: Contact request received
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                      status:
+                        type: string
+                      message:
+                        type: string
 
   /users/{id}:
     patch:

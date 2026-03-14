@@ -4,8 +4,8 @@ set -euo pipefail
 # ─── ExtractIQ Production Deployment Script ───
 # Run on VPS: bash deploy/deploy.sh
 
-APP_DIR="/opt/extractiq"
-REPO_URL="https://github.com/jerryboganda/extractiq.git"
+APP_DIR="${APP_DIR:-/root/extractiq}"
+REPO_URL="git@github.com:jerryboganda/extractiq.git"
 NGINX_CONF="/etc/nginx/sites-available/extractiq.conf"
 NGINX_LINK="/etc/nginx/sites-enabled/extractiq.conf"
 WEB_ROOT="/var/www/extractiq"
@@ -52,6 +52,7 @@ if [ ! -f "$APP_DIR/Backend/.env" ]; then
     sed -i "s|JWT_SECRET=.*|JWT_SECRET=${JWT_SECRET}|" "$APP_DIR/Backend/.env"
     sed -i "s|ENCRYPTION_KEY=.*|ENCRYPTION_KEY=${ENCRYPTION_KEY}|" "$APP_DIR/Backend/.env"
     sed -i "s|CORS_ORIGIN=.*|CORS_ORIGIN=https://extractiq.polytronx.com|" "$APP_DIR/Backend/.env"
+    sed -i "s|APP_BASE_URL=.*|APP_BASE_URL=https://extractiq.polytronx.com/app|" "$APP_DIR/Backend/.env"
     sed -i "s|NODE_ENV=.*|NODE_ENV=production|" "$APP_DIR/Backend/.env"
     sed -i "s|DATABASE_URL=.*|DATABASE_URL=postgresql://mcq_user:${POSTGRES_PASSWORD}@localhost:5432/mcq_platform|" "$APP_DIR/Backend/.env"
     sed -i "s|REDIS_URL=.*|REDIS_URL=redis://:${REDIS_PASSWORD}@localhost:6379|" "$APP_DIR/Backend/.env"
@@ -74,12 +75,12 @@ fi
 # ── 4. Build frontends ──
 echo "[4/8] Building Website..."
 cd "$APP_DIR/Website"
-npm ci --omit=dev > /dev/null 2>&1
+npm ci > /dev/null 2>&1
 npm run build
 
 echo "[4/8] Building Web App..."
 cd "$APP_DIR/Web App"
-npm ci --omit=dev > /dev/null 2>&1
+npm ci > /dev/null 2>&1
 npm run build
 
 # ── 5. Deploy static files ──
@@ -113,7 +114,8 @@ echo "[8/8] Running database migrations..."
 cd "$APP_DIR/Backend"
 npm ci > /dev/null 2>&1
 npx drizzle-kit migrate
-npx tsx packages/db/src/seed.ts || true
+
+echo "  Skipping seed step to preserve production data integrity"
 
 echo ""
 echo "═══════════════════════════════════════"
@@ -123,8 +125,3 @@ echo ""
 echo "  Website:  https://extractiq.polytronx.com"
 echo "  Web App:  https://extractiq.polytronx.com/app"
 echo "  API:      https://extractiq.polytronx.com/api/v1/health"
-echo ""
-echo "  Admin credentials were printed during seed step above."
-echo "  If this is a fresh deploy, scroll up to find them."
-echo "  Change the password immediately after first login."
-echo ""

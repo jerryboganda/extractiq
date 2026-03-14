@@ -16,6 +16,7 @@ interface AuthState {
 }
 
 interface AuthContextValue extends AuthState {
+  register: (payload: { email: string; password: string; name: string; workspaceName: string }) => Promise<void>;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
@@ -32,8 +33,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refreshUser = useCallback(async () => {
     try {
-      const res = await api.get<{ data: { user: User } }>('/auth/me', { skipAuthRefresh: true });
-      setState({ user: res.data.user, isLoading: false, isAuthenticated: true });
+      const res = await api.get<{ data: { user?: User } | User }>('/auth/me', { skipAuthRefresh: true });
+      const user = 'user' in res.data ? res.data.user ?? null : res.data;
+      setState({ user, isLoading: false, isAuthenticated: Boolean(user) });
     } catch {
       setState({ user: null, isLoading: false, isAuthenticated: false });
     }
@@ -49,6 +51,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setState({ user: res.data.user, isLoading: false, isAuthenticated: true });
   }, []);
 
+  const register = useCallback(async (payload: { email: string; password: string; name: string; workspaceName: string }) => {
+    const res = await api.post<{ data: { user: User } }>('/auth/register', payload, { skipAuthRefresh: true });
+    setState({ user: res.data.user, isLoading: false, isAuthenticated: true });
+  }, []);
+
   const logout = useCallback(async () => {
     try {
       await api.post('/auth/logout');
@@ -59,7 +66,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ ...state, login, logout, refreshUser }}>
+    <AuthContext.Provider value={{ ...state, register, login, logout, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

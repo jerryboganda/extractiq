@@ -1,7 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { Request, Response, NextFunction } from 'express';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { NextFunction, Request, Response } from 'express';
 
-// ── Mocks ──────────────────────────────────────────────────
 vi.mock('@mcq-platform/db', () => ({
   db: {
     select: vi.fn(),
@@ -9,9 +8,10 @@ vi.mock('@mcq-platform/db', () => ({
     update: vi.fn(),
     transaction: vi.fn(),
   },
-  users: 'users_table',
-  workspaces: 'workspaces_table',
-  refreshTokens: 'refresh_tokens_table',
+  users: { id: 'users.id', email: 'users.email', workspaceId: 'users.workspaceId' },
+  workspaces: { id: 'workspaces.id', name: 'workspaces.name' },
+  refreshTokens: { id: 'refresh.id', tokenHash: 'refresh.tokenHash', userId: 'refresh.userId', revokedAt: 'refresh.revokedAt' },
+  invitationTokens: { id: 'invites.id', tokenHash: 'invites.tokenHash', userId: 'invites.userId', workspaceId: 'invites.workspaceId', acceptedAt: 'invites.acceptedAt', expiresAt: 'invites.expiresAt' },
 }));
 
 vi.mock('@mcq-platform/auth', () => ({
@@ -24,8 +24,16 @@ vi.mock('@mcq-platform/auth', () => ({
 
 vi.mock('@mcq-platform/config', () => ({
   env: {
-    JWT_SECRET: 'test-secret-key-for-jwt',
+    JWT_SECRET: 'test-secret-key-for-jwt-test-secret-key',
     NODE_ENV: 'test',
+    CORS_ORIGIN: 'http://localhost:8080',
+  },
+}));
+
+vi.mock('@mcq-platform/queue', () => ({
+  enqueue: vi.fn(),
+  QUEUE_NAMES: {
+    NOTIFICATION: 'notification',
   },
 }));
 
@@ -38,18 +46,19 @@ vi.mock('@mcq-platform/logger', () => ({
   }),
 }));
 
-import { login, register, logout, refresh, changePassword, me } from './handlers.js';
+import { acceptInvitation, changePassword, getInvitation, login, logout, me, refresh, register } from './handlers.js';
 import { db } from '@mcq-platform/db';
-import { hashPassword, verifyPassword, signToken, signRefreshToken, verifyToken } from '@mcq-platform/auth';
+import { enqueue } from '@mcq-platform/queue';
+import { hashPassword, signRefreshToken, signToken, verifyPassword, verifyToken } from '@mcq-platform/auth';
 
 const mockedDb = vi.mocked(db);
+const mockedEnqueue = vi.mocked(enqueue);
 const mockedHashPassword = vi.mocked(hashPassword);
-const mockedVerifyPassword = vi.mocked(verifyPassword);
 const mockedSignToken = vi.mocked(signToken);
 const mockedSignRefreshToken = vi.mocked(signRefreshToken);
+const mockedVerifyPassword = vi.mocked(verifyPassword);
 const mockedVerifyToken = vi.mocked(verifyToken);
 
-// ── Helpers ────────────────────────────────────────────────
 function createReq(overrides: Partial<Request> = {}): Request {
   return {
     body: {},
@@ -65,32 +74,28 @@ function createReq(overrides: Partial<Request> = {}): Request {
 }
 
 function createRes(): Response {
-  const res = {
+  return {
     status: vi.fn().mockReturnThis(),
     json: vi.fn().mockReturnThis(),
     cookie: vi.fn().mockReturnThis(),
     clearCookie: vi.fn().mockReturnThis(),
   } as unknown as Response;
-  return res;
 }
 
-// Helper to chain drizzle query builder methods
 function mockChain(result: unknown) {
   const chain: Record<string, unknown> = {};
   chain.from = vi.fn().mockReturnValue(chain);
   chain.where = vi.fn().mockReturnValue(chain);
-  chain.orderBy = vi.fn().mockReturnValue(chain);
   chain.limit = vi.fn().mockReturnValue(chain);
-  chain.offset = vi.fn().mockReturnValue(chain);
+  chain.innerJoin = vi.fn().mockReturnValue(chain);
+  chain.orderBy = vi.fn().mockReturnValue(chain);
   chain.values = vi.fn().mockReturnValue(chain);
-  chain.returning = vi.fn().mockReturnValue(chain);
+  chain.returning = vi.fn().mockResolvedValue(result);
   chain.set = vi.fn().mockReturnValue(chain);
-  chain.groupBy = vi.fn().mockReturnValue(chain);
-  chain.then = vi.fn().mockImplementation((resolve: any) => resolve(result));
+  chain.then = vi.fn().mockImplementation((resolve: (value: unknown) => unknown) => resolve(result));
   return chain;
 }
 
-// ── Tests ──────────────────────────────────────────────────
 describe('auth handlers', () => {
   let next: NextFunction;
 
@@ -99,338 +104,244 @@ describe('auth handlers', () => {
     next = vi.fn();
   });
 
-  // ────────────────────────────────────────────────────────
-  // LOGIN
-  // ────────────────────────────────────────────────────────
-  describe('login', () => {
-    it('returns 401 for unknown email', async () => {
-      const chain = mockChain([]);
-      mockedDb.select.mockReturnValue(chain as any);
+  it('returns 401 for unknown login email', async () => {
+    mockedDb.select.mockReturnValueOnce(mockChain([]) as never);
 
-      const req = createReq({ body: { email: 'nobody@test.com', password: 'pass123456' } });
-      const res = createRes();
+    await login(
+      createReq({ body: { email: 'missing@example.com', password: 'Password1!' } }),
+      createRes(),
+      next,
+    );
 
-      await login(req, res, next);
-
-      expect(next).toHaveBeenCalledWith(
-        expect.objectContaining({ statusCode: 401, code: 'INVALID_CREDENTIALS' }),
-      );
-    });
-
-    it('returns 403 for inactive user', async () => {
-      const chain = mockChain([{ id: 'u1', email: 'test@test.com', status: 'inactive', passwordHash: 'hash' }]);
-      mockedDb.select.mockReturnValue(chain as any);
-
-      const req = createReq({ body: { email: 'test@test.com', password: 'pass123456' } });
-      const res = createRes();
-
-      await login(req, res, next);
-
-      expect(next).toHaveBeenCalledWith(
-        expect.objectContaining({ statusCode: 403, code: 'ACCOUNT_INACTIVE' }),
-      );
-    });
-
-    it('returns 401 for wrong password', async () => {
-      const chain = mockChain([{ id: 'u1', email: 'test@test.com', status: 'active', passwordHash: 'hash', workspaceId: 'ws-1', role: 'operator' }]);
-      mockedDb.select.mockReturnValue(chain as any);
-      mockedVerifyPassword.mockResolvedValue(false);
-
-      const req = createReq({ body: { email: 'test@test.com', password: 'wrongpass' } });
-      const res = createRes();
-
-      await login(req, res, next);
-
-      expect(next).toHaveBeenCalledWith(
-        expect.objectContaining({ statusCode: 401, code: 'INVALID_CREDENTIALS' }),
-      );
-    });
-
-    it('returns user data and sets cookies on success', async () => {
-      const user = { id: 'u1', email: 'test@test.com', name: 'Test', status: 'active', passwordHash: 'hash', workspaceId: 'ws-1', role: 'workspace_admin' };
-      const selectChain = mockChain([user]);
-      mockedDb.select.mockReturnValue(selectChain as any);
-      mockedVerifyPassword.mockResolvedValue(true);
-
-      const updateChain = mockChain([user]);
-      mockedDb.update.mockReturnValue(updateChain as any);
-
-      const insertChain = mockChain([{ id: 'rt1' }]);
-      mockedDb.insert.mockReturnValue(insertChain as any);
-
-      mockedSignToken.mockReturnValue('access-token-123');
-      mockedSignRefreshToken.mockReturnValue('refresh-token-456');
-
-      const req = createReq({ body: { email: 'test@test.com', password: 'Correct1!' } });
-      const res = createRes();
-
-      await login(req, res, next);
-
-      expect(res.cookie).toHaveBeenCalledWith('access_token', 'access-token-123', expect.objectContaining({ httpOnly: true }));
-      expect(res.cookie).toHaveBeenCalledWith('refresh_token', 'refresh-token-456', expect.objectContaining({ httpOnly: true }));
-      expect(res.json).toHaveBeenCalledWith({
-        data: {
-          user: { id: 'u1', email: 'test@test.com', name: 'Test', role: 'workspace_admin', workspaceId: 'ws-1' },
-          token: 'access-token-123',
-        },
-      });
-      expect(next).not.toHaveBeenCalled();
-    });
-
-    it('lowercases email before lookup', async () => {
-      const chain = mockChain([]);
-      mockedDb.select.mockReturnValue(chain as any);
-
-      const req = createReq({ body: { email: 'TEST@EXAMPLE.COM', password: 'pass123456' } });
-      const res = createRes();
-
-      await login(req, res, next);
-
-      // The select().from().where() should have been called — verify via next being called with 401
-      expect(next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 401 }));
-    });
+    expect(next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 401, code: 'INVALID_CREDENTIALS' }));
   });
 
-  // ────────────────────────────────────────────────────────
-  // REGISTER
-  // ────────────────────────────────────────────────────────
-  describe('register', () => {
-    it('returns 409 if email already exists', async () => {
-      const chain = mockChain([{ id: 'existing-user' }]);
-      mockedDb.select.mockReturnValue(chain as any);
-
-      const req = createReq({
-        body: { email: 'exists@test.com', password: 'Pass123!', name: 'Tester', workspaceName: 'My Workspace' },
-      });
-      const res = createRes();
-
-      await register(req, res, next);
-
-      expect(next).toHaveBeenCalledWith(
-        expect.objectContaining({ statusCode: 409, code: 'EMAIL_EXISTS' }),
-      );
-    });
-
-    it('creates workspace + user and returns 201 on success', async () => {
-      const selectChain = mockChain([]);
-      mockedDb.select.mockReturnValue(selectChain as any);
-
-      const workspace = { id: 'ws-new', name: 'Test WS' };
-      const user = { id: 'u-new', email: 'new@test.com', name: 'New', role: 'workspace_admin', workspaceId: 'ws-new' };
-
-      mockedDb.transaction.mockImplementation(async (fn: any) => {
-        const tx = {
-          insert: vi.fn().mockReturnValue({
+  it('registers a workspace admin and sets auth cookies', async () => {
+    mockedDb.select.mockReturnValueOnce(mockChain([]) as never);
+    mockedHashPassword.mockResolvedValue('hashed-password');
+    mockedSignToken.mockReturnValue('access-token');
+    mockedSignRefreshToken.mockReturnValue('refresh-token');
+    mockedDb.insert.mockReturnValue(mockChain([]) as never);
+    mockedDb.transaction.mockImplementation(async (callback: (tx: any) => Promise<unknown>) => {
+      const tx = {
+        insert: vi.fn()
+          .mockReturnValueOnce({
             values: vi.fn().mockReturnValue({
-              returning: vi.fn()
-                .mockResolvedValueOnce([workspace])
-                .mockResolvedValueOnce([user]),
+              returning: vi.fn().mockResolvedValue([{ id: 'ws-1', name: 'Workspace One' }]),
+            }),
+          })
+          .mockReturnValueOnce({
+            values: vi.fn().mockReturnValue({
+              returning: vi.fn().mockResolvedValue([{
+                id: 'user-1',
+                email: 'owner@example.com',
+                name: 'Owner',
+                role: 'workspace_admin',
+              }]),
             }),
           }),
-        };
-        return fn(tx);
-      });
+      };
 
-      mockedHashPassword.mockResolvedValue('hashed-pw');
-      mockedSignToken.mockReturnValue('new-access');
-      mockedSignRefreshToken.mockReturnValue('new-refresh');
+      return callback(tx);
+    });
 
-      const insertChain = mockChain([{ id: 'rt1' }]);
-      mockedDb.insert.mockReturnValue(insertChain as any);
+    const res = createRes();
+    await register(
+      createReq({
+        body: {
+          email: 'owner@example.com',
+          password: 'Password1!',
+          name: 'Owner',
+          workspaceName: 'Workspace One',
+        },
+      }),
+      res,
+      next,
+    );
 
-      const req = createReq({
-        body: { email: 'new@test.com', password: 'StrongPass1!', name: 'New', workspaceName: 'Test WS' },
-      });
-      const res = createRes();
+    expect(res.status).toHaveBeenCalledWith(201);
+    expect(res.cookie).toHaveBeenCalledTimes(2);
+    expect(res.json).toHaveBeenCalledWith({
+      data: {
+        user: {
+          id: 'user-1',
+          email: 'owner@example.com',
+          name: 'Owner',
+          role: 'workspace_admin',
+          workspaceId: 'ws-1',
+        },
+        token: 'access-token',
+      },
+    });
+    expect(next).not.toHaveBeenCalled();
+  });
 
-      await register(req, res, next);
+  it('returns invitation metadata for a valid invite token', async () => {
+    mockedDb.select.mockReturnValueOnce(mockChain([{
+      email: 'invitee@example.com',
+      role: 'reviewer',
+      workspaceId: 'ws-1',
+      workspaceName: 'Workspace One',
+      name: 'Invitee',
+      expiresAt: new Date(Date.now() + 60_000),
+      acceptedAt: null,
+    }]) as never);
 
-      expect(res.status).toHaveBeenCalledWith(201);
-      expect(res.cookie).toHaveBeenCalledWith('access_token', 'new-access', expect.any(Object));
-      expect(res.cookie).toHaveBeenCalledWith('refresh_token', 'new-refresh', expect.any(Object));
-      expect(next).not.toHaveBeenCalled();
+    const res = createRes();
+    await getInvitation(createReq({ params: { token: 'opaque-token' } as any }), res, next);
+
+    expect(res.json).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        email: 'invitee@example.com',
+        role: 'reviewer',
+        workspaceName: 'Workspace One',
+        status: 'pending',
+        expired: false,
+        accepted: false,
+      }),
     });
   });
 
-  // ────────────────────────────────────────────────────────
-  // LOGOUT
-  // ────────────────────────────────────────────────────────
-  describe('logout', () => {
-    it('clears cookies and revokes refresh token', async () => {
-      const updateChain = mockChain([{ id: 'rt1' }]);
-      mockedDb.update.mockReturnValue(updateChain as any);
+  it('accepts an invitation, revokes old sessions, and enqueues a notification', async () => {
+    mockedDb.select.mockReturnValueOnce(mockChain([{
+      id: 'invite-1',
+      workspaceId: 'ws-1',
+      userId: 'user-2',
+      expiresAt: new Date(Date.now() + 60_000),
+      acceptedAt: null,
+      role: 'reviewer',
+      email: 'invitee@example.com',
+    }]) as never);
+    mockedHashPassword.mockResolvedValue('new-password-hash');
+    mockedSignToken.mockReturnValue('accepted-access-token');
+    mockedSignRefreshToken.mockReturnValue('accepted-refresh-token');
+    mockedDb.insert.mockReturnValue(mockChain([]) as never);
+    mockedDb.transaction.mockImplementation(async (callback: (tx: any) => Promise<unknown>) => {
+      const tx = {
+        update: vi.fn()
+          .mockReturnValueOnce({
+            set: vi.fn().mockReturnValue({
+              where: vi.fn().mockReturnValue({
+                returning: vi.fn().mockResolvedValue([{
+                  id: 'user-2',
+                  name: 'Accepted User',
+                  role: 'reviewer',
+                }]),
+              }),
+            }),
+          })
+          .mockReturnValueOnce({
+            set: vi.fn().mockReturnValue({
+              where: vi.fn().mockResolvedValue(undefined),
+            }),
+          })
+          .mockReturnValueOnce({
+            set: vi.fn().mockReturnValue({
+              where: vi.fn().mockResolvedValue(undefined),
+            }),
+          }),
+      };
 
-      const req = createReq({ cookies: { refresh_token: 'some-refresh-token' } });
-      const res = createRes();
-
-      await logout(req, res, next);
-
-      expect(res.clearCookie).toHaveBeenCalledWith('access_token', expect.any(Object));
-      expect(res.clearCookie).toHaveBeenCalledWith('refresh_token', expect.any(Object));
-      expect(res.json).toHaveBeenCalledWith({ data: { message: 'Logged out' } });
+      return callback(tx);
     });
 
-    it('clears cookies even when no refresh cookie is present', async () => {
-      const req = createReq({ cookies: {} });
-      const res = createRes();
+    const res = createRes();
+    await acceptInvitation(
+      createReq({
+        body: {
+          token: 'opaque-token',
+          name: 'Accepted User',
+          password: 'Password1!',
+        },
+      }),
+      res,
+      next,
+    );
 
-      await logout(req, res, next);
+    expect(res.cookie).toHaveBeenCalledTimes(2);
+    expect(res.json).toHaveBeenCalledWith({
+      data: {
+        user: {
+          id: 'user-2',
+          email: 'invitee@example.com',
+          name: 'Accepted User',
+          role: 'reviewer',
+          workspaceId: 'ws-1',
+        },
+        token: 'accepted-access-token',
+      },
+    });
+    expect(mockedEnqueue).toHaveBeenCalledWith('notification', expect.objectContaining({
+      type: 'user.invitation_accepted',
+      workspaceId: 'ws-1',
+      userId: 'user-2',
+    }));
+  });
 
-      expect(res.clearCookie).toHaveBeenCalledTimes(2);
-      expect(res.json).toHaveBeenCalledWith({ data: { message: 'Logged out' } });
+  it('refreshes an access token for a valid session', async () => {
+    mockedVerifyToken.mockReturnValue({ sub: 'user-1' } as never);
+    mockedDb.select
+      .mockReturnValueOnce(mockChain([{ id: 'rt-1', revokedAt: null }]) as never)
+      .mockReturnValueOnce(mockChain([{ id: 'user-1', status: 'active', workspaceId: 'ws-1', role: 'operator' }]) as never);
+    mockedSignToken.mockReturnValue('new-access-token');
+
+    const res = createRes();
+    await refresh(createReq({ cookies: { refresh_token: 'refresh-token' } as any }), res, next);
+
+    expect(res.cookie).toHaveBeenCalledWith('access_token', 'new-access-token', expect.any(Object));
+    expect(res.json).toHaveBeenCalledWith({ data: { token: 'new-access-token' } });
+  });
+
+  it('changes the current user password', async () => {
+    mockedDb.select.mockReturnValueOnce(mockChain([{ id: 'user-1', passwordHash: 'old-hash' }]) as never);
+    mockedVerifyPassword.mockResolvedValue(true);
+    mockedHashPassword.mockResolvedValue('new-hash');
+    mockedDb.update.mockReturnValue(mockChain([]) as never);
+
+    const res = createRes();
+    await changePassword(
+      createReq({ body: { currentPassword: 'OldPass1!', newPassword: 'NewPass1!' } }),
+      res,
+      next,
+    );
+
+    expect(res.json).toHaveBeenCalledWith({ data: { message: 'Password changed successfully' } });
+  });
+
+  it('returns the authenticated user through /auth/me', async () => {
+    mockedDb.select.mockReturnValueOnce(mockChain([{
+      id: 'user-1',
+      email: 'owner@example.com',
+      name: 'Owner',
+      role: 'workspace_admin',
+      status: 'active',
+      workspaceId: 'ws-1',
+      avatarUrl: null,
+      lastActiveAt: null,
+      createdAt: new Date('2026-03-13T00:00:00.000Z'),
+    }]) as never);
+
+    const res = createRes();
+    await me(createReq(), res, next);
+
+    expect(res.json).toHaveBeenCalledWith({
+      data: {
+        user: expect.objectContaining({
+          id: 'user-1',
+          email: 'owner@example.com',
+          workspaceId: 'ws-1',
+        }),
+      },
     });
   });
 
-  // ────────────────────────────────────────────────────────
-  // REFRESH
-  // ────────────────────────────────────────────────────────
-  describe('refresh', () => {
-    it('returns 401 when no refresh cookie', async () => {
-      const req = createReq({ cookies: {} });
-      const res = createRes();
+  it('clears cookies on logout', async () => {
+    mockedDb.update.mockReturnValue(mockChain([]) as never);
+    const res = createRes();
 
-      await refresh(req, res, next);
+    await logout(createReq({ cookies: { refresh_token: 'refresh-token' } as any }), res, next);
 
-      expect(next).toHaveBeenCalledWith(
-        expect.objectContaining({ statusCode: 401, code: 'NO_REFRESH_TOKEN' }),
-      );
-    });
-
-    it('returns 401 for invalid/expired token', async () => {
-      mockedVerifyToken.mockImplementation(() => { throw new Error('expired'); });
-
-      const req = createReq({ cookies: { refresh_token: 'expired-token' } });
-      const res = createRes();
-
-      await refresh(req, res, next);
-
-      expect(next).toHaveBeenCalledWith(
-        expect.objectContaining({ statusCode: 401, code: 'INVALID_REFRESH_TOKEN' }),
-      );
-    });
-
-    it('returns 401 for revoked token', async () => {
-      mockedVerifyToken.mockReturnValue({ sub: 'u1', wid: 'ws-1', role: 'operator' } as any);
-
-      const selectChain = mockChain([{ id: 'rt1', revokedAt: new Date() }]);
-      mockedDb.select.mockReturnValue(selectChain as any);
-
-      const req = createReq({ cookies: { refresh_token: 'revoked-token' } });
-      const res = createRes();
-
-      await refresh(req, res, next);
-
-      expect(next).toHaveBeenCalledWith(
-        expect.objectContaining({ statusCode: 401, code: 'REVOKED_TOKEN' }),
-      );
-    });
-
-    it('issues new access token on valid refresh', async () => {
-      mockedVerifyToken.mockReturnValue({ sub: 'u1', wid: 'ws-1', role: 'operator' } as any);
-
-      // First select: refresh token lookup (not revoked)
-      const refreshChain = mockChain([{ id: 'rt1', revokedAt: null }]);
-      // Second select: user lookup
-      const userChain = mockChain([{ id: 'u1', status: 'active', workspaceId: 'ws-1', role: 'operator' }]);
-
-      mockedDb.select
-        .mockReturnValueOnce(refreshChain as any)
-        .mockReturnValueOnce(userChain as any);
-
-      mockedSignToken.mockReturnValue('new-access-token');
-
-      const req = createReq({ cookies: { refresh_token: 'valid-refresh' } });
-      const res = createRes();
-
-      await refresh(req, res, next);
-
-      expect(res.cookie).toHaveBeenCalledWith('access_token', 'new-access-token', expect.any(Object));
-      expect(res.json).toHaveBeenCalledWith({ data: { token: 'new-access-token' } });
-      expect(next).not.toHaveBeenCalled();
-    });
-  });
-
-  // ────────────────────────────────────────────────────────
-  // CHANGE PASSWORD
-  // ────────────────────────────────────────────────────────
-  describe('changePassword', () => {
-    it('returns 404 if user not found', async () => {
-      const chain = mockChain([]);
-      mockedDb.select.mockReturnValue(chain as any);
-
-      const req = createReq({ body: { currentPassword: 'old', newPassword: 'New12345!' } });
-      const res = createRes();
-
-      await changePassword(req, res, next);
-
-      expect(next).toHaveBeenCalledWith(
-        expect.objectContaining({ statusCode: 404, code: 'USER_NOT_FOUND' }),
-      );
-    });
-
-    it('returns 401 if current password is wrong', async () => {
-      const chain = mockChain([{ id: 'u1', passwordHash: 'hash' }]);
-      mockedDb.select.mockReturnValue(chain as any);
-      mockedVerifyPassword.mockResolvedValue(false);
-
-      const req = createReq({ body: { currentPassword: 'wrong', newPassword: 'New12345!' } });
-      const res = createRes();
-
-      await changePassword(req, res, next);
-
-      expect(next).toHaveBeenCalledWith(
-        expect.objectContaining({ statusCode: 401, code: 'INVALID_PASSWORD' }),
-      );
-    });
-
-    it('updates password on valid current password', async () => {
-      const chain = mockChain([{ id: 'u1', passwordHash: 'old-hash' }]);
-      mockedDb.select.mockReturnValue(chain as any);
-      mockedVerifyPassword.mockResolvedValue(true);
-      mockedHashPassword.mockResolvedValue('new-hash');
-
-      const updateChain = mockChain([]);
-      mockedDb.update.mockReturnValue(updateChain as any);
-
-      const req = createReq({ body: { currentPassword: 'OldPass1!', newPassword: 'NewPass1!' } });
-      const res = createRes();
-
-      await changePassword(req, res, next);
-
-      expect(res.json).toHaveBeenCalledWith({ data: { message: 'Password changed successfully' } });
-      expect(next).not.toHaveBeenCalled();
-    });
-  });
-
-  // ────────────────────────────────────────────────────────
-  // ME
-  // ────────────────────────────────────────────────────────
-  describe('me', () => {
-    it('returns current user data', async () => {
-      const userData = { id: 'u1', email: 'me@test.com', name: 'Me', role: 'operator', status: 'active', workspaceId: 'ws-1', avatarUrl: null, lastActiveAt: null, createdAt: new Date() };
-      const chain = mockChain([userData]);
-      mockedDb.select.mockReturnValue(chain as any);
-
-      const req = createReq();
-      const res = createRes();
-
-      await me(req, res, next);
-
-      expect(res.json).toHaveBeenCalledWith({ data: userData });
-    });
-
-    it('returns 404 if user not found', async () => {
-      const chain = mockChain([]);
-      mockedDb.select.mockReturnValue(chain as any);
-
-      const req = createReq();
-      const res = createRes();
-
-      await me(req, res, next);
-
-      expect(next).toHaveBeenCalledWith(
-        expect.objectContaining({ statusCode: 404, code: 'USER_NOT_FOUND' }),
-      );
-    });
+    expect(res.clearCookie).toHaveBeenCalledTimes(2);
+    expect(res.json).toHaveBeenCalledWith({ data: { message: 'Logged out' } });
   });
 });

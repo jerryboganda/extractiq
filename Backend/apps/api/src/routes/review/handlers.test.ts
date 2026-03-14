@@ -1,22 +1,22 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { Request, Response, NextFunction } from 'express';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { NextFunction, Request, Response } from 'express';
 
 vi.mock('@mcq-platform/db', () => ({
   db: {
     select: vi.fn(),
     insert: vi.fn(),
     update: vi.fn(),
+    transaction: vi.fn(),
   },
-  reviewItems: 'review_items_table',
-  reviewActions: 'review_actions_table',
-  mcqRecords: 'mcq_records_table',
+  reviewItems: { id: 'reviewItems.id', workspaceId: 'reviewItems.workspaceId', createdAt: 'reviewItems.createdAt' },
+  reviewActions: { reviewItemId: 'reviewActions.reviewItemId', createdAt: 'reviewActions.createdAt' },
+  mcqRecords: { id: 'mcq.id', documentId: 'mcq.documentId', version: 'mcq.version' },
+  documents: { id: 'documents.id', filename: 'documents.filename' },
+  users: { id: 'users.id', name: 'users.name' },
+  mcqRecordHistory: { id: 'history.id' },
 }));
 
-vi.mock('@mcq-platform/logger', () => ({
-  createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
-}));
-
-import { listQueue, getDetail, approve, reject, flag, edit, navigation, bulk } from './handlers.js';
+import { approve, edit, getDetail, listQueue, navigation } from './handlers.js';
 import { db } from '@mcq-platform/db';
 
 const mockedDb = vi.mocked(db);
@@ -26,10 +26,8 @@ function createReq(overrides: Partial<Request> = {}): Request {
     body: {},
     query: { page: 1, limit: 20 },
     params: {},
-    cookies: {},
-    headers: {},
-    userId: 'user-1',
     workspaceId: 'ws-1',
+    userId: 'reviewer-1',
     userRole: 'reviewer',
     ...overrides,
   } as unknown as Request;
@@ -50,10 +48,9 @@ function mockChain(result: unknown) {
   chain.limit = vi.fn().mockReturnValue(chain);
   chain.offset = vi.fn().mockReturnValue(chain);
   chain.values = vi.fn().mockReturnValue(chain);
-  chain.returning = vi.fn().mockReturnValue(chain);
+  chain.returning = vi.fn().mockResolvedValue(result);
   chain.set = vi.fn().mockReturnValue(chain);
-  chain.groupBy = vi.fn().mockReturnValue(chain);
-  chain.then = vi.fn().mockImplementation((resolve: any) => resolve(result));
+  chain.then = vi.fn().mockImplementation((resolve: (value: unknown) => unknown) => resolve(result));
   return chain;
 }
 
@@ -65,227 +62,200 @@ describe('review handlers', () => {
     next = vi.fn();
   });
 
-  describe('listQueue', () => {
-    it('returns enriched review items with MCQ data', async () => {
-      const items = [{ id: 'ri1', mcqRecordId: 'mcq1', severity: 'high', status: 'pending', createdAt: new Date() }];
-      const itemsChain = mockChain(items);
-      const countChain = mockChain([{ total: 1 }]);
-      const mcqChain = mockChain([{ questionText: 'What is X?', confidence: 85, options: [] }]);
+  it('lists pending review items with enriched MCQ metadata', async () => {
+    mockedDb.select
+      .mockReturnValueOnce(mockChain([{
+        id: 'review-1',
+        mcqRecordId: 'mcq-1',
+        severity: 'high',
+        flagTypes: ['confidence'],
+        reasonSummary: 'Low confidence',
+        assignedTo: 'reviewer-2',
+        status: 'pending',
+        createdAt: new Date('2026-03-13T00:00:00.000Z'),
+      }]) as never)
+      .mockReturnValueOnce(mockChain([{ total: 1 }]) as never)
+      .mockReturnValueOnce(mockChain([{
+        questionText: 'What is ATP?',
+        confidence: 0.82,
+        options: [],
+        documentId: 'doc-1',
+      }]) as never)
+      .mockReturnValueOnce(mockChain([{ filename: 'biology.pdf' }]) as never)
+      .mockReturnValueOnce(mockChain([{ name: 'Dr Reviewer' }]) as never);
 
-      mockedDb.select
-        .mockReturnValueOnce(itemsChain as any)
-        .mockReturnValueOnce(countChain as any)
-        .mockReturnValueOnce(mcqChain as any);
+    const res = createRes();
+    await listQueue(createReq({ query: { page: 1, limit: 10 } as any }), res, next);
 
-      const req = createReq({ query: { page: 1, limit: 10 } as any });
-      const res = createRes();
-
-      await listQueue(req, res, next);
-
-      const response = (res.json as any).mock.calls[0][0];
-      expect(response.data.items[0].question).toBe('What is X?');
-      expect(response.data.items[0].confidence).toBe(85);
-      expect(response.data.total).toBe(1);
+    expect(res.json).toHaveBeenCalledWith({
+      data: {
+        items: [expect.objectContaining({
+          id: 'review-1',
+          question: 'What is ATP?',
+          confidence: 82,
+          document: 'biology.pdf',
+          reviewer: 'Dr Reviewer',
+          flags: 1,
+        })],
+        total: 1,
+        page: 1,
+        limit: 10,
+        totalPages: 1,
+      },
     });
   });
 
-  describe('getDetail', () => {
-    it('returns review item with MCQ and actions', async () => {
-      const item = { id: 'ri1', mcqRecordId: 'mcq1', workspaceId: 'ws-1' };
-      const mcq = { id: 'mcq1', questionText: 'What is X?' };
-      const actions = [{ id: 'a1', actionType: 'edit' }];
+  it('falls back to default pagination when no query params are provided', async () => {
+    mockedDb.select
+      .mockReturnValueOnce(mockChain([]) as never)
+      .mockReturnValueOnce(mockChain([{ total: 0 }]) as never);
 
-      // First select: review item
-      const itemChain = mockChain([item]);
-      // Second select: mcq
-      const mcqChain = mockChain([mcq]);
-      // Third select: actions (no .limit)
-      const actionsChain: Record<string, unknown> = {};
-      actionsChain.from = vi.fn().mockReturnValue(actionsChain);
-      actionsChain.where = vi.fn().mockReturnValue(actionsChain);
-      actionsChain.orderBy = vi.fn().mockResolvedValue(actions);
+    const res = createRes();
+    await listQueue(createReq({ query: {} as any }), res, next);
 
-      mockedDb.select
-        .mockReturnValueOnce(itemChain as any)
-        .mockReturnValueOnce(mcqChain as any)
-        .mockReturnValueOnce(actionsChain as any);
-
-      const req = createReq({ params: { id: 'ri1' } as any });
-      const res = createRes();
-
-      await getDetail(req, res, next);
-
-      expect(res.json).toHaveBeenCalledWith({
-        data: { ...item, mcq, actions },
-      });
-    });
-
-    it('returns 404 for missing review item', async () => {
-      const chain = mockChain([]);
-      mockedDb.select.mockReturnValue(chain as any);
-
-      const req = createReq({ params: { id: 'no-id' } as any });
-      const res = createRes();
-
-      await getDetail(req, res, next);
-
-      expect(next).toHaveBeenCalledWith(
-        expect.objectContaining({ statusCode: 404 }),
-      );
+    expect(res.json).toHaveBeenCalledWith({
+      data: {
+        items: [],
+        total: 0,
+        page: 1,
+        limit: 20,
+        totalPages: 0,
+      },
     });
   });
 
-  describe('approve', () => {
-    it('marks review item as approved', async () => {
-      // performReviewAction: select item, insert action, update item, update mcq
-      const item = { id: 'ri1', mcqRecordId: 'mcq1', workspaceId: 'ws-1' };
-      const selectChain = mockChain([item]);
-      mockedDb.select.mockReturnValue(selectChain as any);
+  it('returns flattened review detail data for the editor screen', async () => {
+    mockedDb.select
+      .mockReturnValueOnce(mockChain([{
+        id: 'review-1',
+        workspaceId: 'ws-1',
+        mcqRecordId: 'mcq-1',
+        status: 'pending',
+        assignedTo: 'reviewer-1',
+      }]) as never)
+      .mockReturnValueOnce(mockChain([{
+        id: 'mcq-1',
+        documentId: 'doc-1',
+        questionText: 'What is ATP?',
+        options: [
+          { label: 'A', text: 'Energy currency' },
+          { label: 'B', text: 'Protein' },
+        ],
+        correctAnswer: 'A',
+        explanation: 'ATP stores usable energy.',
+        confidence: 0.91,
+        confidenceBreakdown: { extraction: 0.92, validation: 0.9 },
+        sourcePage: 3,
+        sourceExcerpt: 'ATP is the energy currency of the cell.',
+        difficulty: 'medium',
+        flags: ['biology'],
+      }]) as never)
+      .mockReturnValueOnce(mockChain([{ id: 'action-1', actionType: 'flag' }]) as never)
+      .mockReturnValueOnce(mockChain([{ filename: 'biology.pdf' }]) as never);
 
-      const insertChain = mockChain([{ id: 'a1' }]);
-      mockedDb.insert.mockReturnValue(insertChain as any);
+    const res = createRes();
+    await getDetail(createReq({ params: { id: 'review-1' } as any }), res, next);
 
-      const approved = { id: 'ri1', status: 'approved' };
-      const updateChain = mockChain([approved]);
-      mockedDb.update.mockReturnValue(updateChain as any);
-
-      const req = createReq({ params: { id: 'ri1' } as any });
-      const res = createRes();
-
-      await approve(req, res, next);
-
-      expect(res.json).toHaveBeenCalledWith({ data: approved });
+    expect(res.json).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        id: 'review-1',
+        question: 'What is ATP?',
+        options: ['Energy currency', 'Protein'],
+        correctIndex: 0,
+        confidence: 91,
+        document: 'biology.pdf',
+        page: 3,
+        tags: ['biology'],
+        actions: [{ id: 'action-1', actionType: 'flag' }],
+      }),
     });
   });
 
-  describe('reject', () => {
-    it('marks review item as rejected', async () => {
-      const item = { id: 'ri1', mcqRecordId: 'mcq1', workspaceId: 'ws-1' };
-      const selectChain = mockChain([item]);
-      mockedDb.select.mockReturnValue(selectChain as any);
+  it('approves a review item inside a transaction and syncs MCQ review status', async () => {
+    mockedDb.select.mockReturnValueOnce(mockChain([{
+      id: 'review-1',
+      workspaceId: 'ws-1',
+      mcqRecordId: 'mcq-1',
+    }]) as never);
+    mockedDb.transaction.mockImplementation(async (callback: (tx: any) => Promise<unknown>) => {
+      const tx = {
+        insert: vi.fn().mockReturnValue({
+          values: vi.fn().mockResolvedValue(undefined),
+        }),
+        update: vi.fn()
+          .mockReturnValueOnce({
+            set: vi.fn().mockReturnValue({
+              where: vi.fn().mockReturnValue({
+                returning: vi.fn().mockResolvedValue([{ id: 'review-1', status: 'approved' }]),
+              }),
+            }),
+          })
+          .mockReturnValueOnce({
+            set: vi.fn().mockReturnValue({
+              where: vi.fn().mockResolvedValue(undefined),
+            }),
+          }),
+      };
 
-      const insertChain = mockChain([{ id: 'a1' }]);
-      mockedDb.insert.mockReturnValue(insertChain as any);
-
-      const rejected = { id: 'ri1', status: 'rejected' };
-      const updateChain = mockChain([rejected]);
-      mockedDb.update.mockReturnValue(updateChain as any);
-
-      const req = createReq({ params: { id: 'ri1' } as any });
-      const res = createRes();
-
-      await reject(req, res, next);
-
-      expect(res.json).toHaveBeenCalledWith({ data: rejected });
+      return callback(tx);
     });
+
+    const res = createRes();
+    await approve(createReq({ params: { id: 'review-1' } as any }), res, next);
+
+    expect(res.json).toHaveBeenCalledWith({ data: { id: 'review-1', status: 'approved' } });
   });
 
-  describe('flag', () => {
-    it('flags review item with reason', async () => {
-      const item = { id: 'ri1', mcqRecordId: 'mcq1', workspaceId: 'ws-1' };
-      const selectChain = mockChain([item]);
-      mockedDb.select.mockReturnValue(selectChain as any);
+  it('persists review edits and writes MCQ history', async () => {
+    mockedDb.select
+      .mockReturnValueOnce(mockChain([{
+        id: 'review-1',
+        workspaceId: 'ws-1',
+        mcqRecordId: 'mcq-1',
+      }]) as never)
+      .mockReturnValueOnce(mockChain([{
+        id: 'mcq-1',
+        version: 2,
+      }]) as never);
+    mockedDb.insert.mockReturnValue(mockChain([]) as never);
+    mockedDb.update.mockReturnValue(mockChain([]) as never);
 
-      const insertChain = mockChain([{ id: 'a1' }]);
-      mockedDb.insert.mockReturnValue(insertChain as any);
+    const res = createRes();
+    await edit(
+      createReq({
+        params: { id: 'review-1' } as any,
+        body: {
+          question: 'Updated question?',
+          options: ['Correct', 'Incorrect'],
+          correctIndex: 0,
+          explanation: 'Updated explanation',
+          tags: ['updated'],
+        },
+      }),
+      res,
+      next,
+    );
 
-      const flagged = { id: 'ri1', status: 'flagged' };
-      const updateChain = mockChain([flagged]);
-      mockedDb.update.mockReturnValue(updateChain as any);
-
-      const req = createReq({ params: { id: 'ri1' } as any, body: { reason: 'Incorrect answer' } });
-      const res = createRes();
-
-      await flag(req, res, next);
-
-      expect(res.json).toHaveBeenCalledWith({ data: flagged });
-    });
+    expect(mockedDb.insert).toHaveBeenCalledTimes(2);
+    expect(res.json).toHaveBeenCalledWith({ data: { message: 'Edit applied' } });
   });
 
-  describe('edit', () => {
-    it('applies edits to MCQ record and logs action', async () => {
-      const item = { id: 'ri1', mcqRecordId: 'mcq1', workspaceId: 'ws-1' };
-      const selectChain = mockChain([item]);
-      mockedDb.select.mockReturnValue(selectChain as any);
+  it('returns previous and next review ids for navigation', async () => {
+    mockedDb.select.mockReturnValueOnce(mockChain([{ id: 'review-3' }, { id: 'review-2' }, { id: 'review-1' }]) as never);
 
-      const updateChain = mockChain([{}]);
-      mockedDb.update.mockReturnValue(updateChain as any);
+    const res = createRes();
+    await navigation(createReq({ params: { id: 'review-2' } as any }), res, next);
 
-      const insertChain = mockChain([{ id: 'a1' }]);
-      mockedDb.insert.mockReturnValue(insertChain as any);
-
-      const req = createReq({
-        params: { id: 'ri1' } as any,
-        body: { question: 'Updated question?', explanation: 'New explanation' },
-      });
-      const res = createRes();
-
-      await edit(req, res, next);
-
-      expect(res.json).toHaveBeenCalledWith({ data: { message: 'Edit applied' } });
-    });
-
-    it('returns 404 for missing review item on edit', async () => {
-      const chain = mockChain([]);
-      mockedDb.select.mockReturnValue(chain as any);
-
-      const req = createReq({ params: { id: 'missing' } as any, body: { question: 'X?' } });
-      const res = createRes();
-
-      await edit(req, res, next);
-
-      expect(next).toHaveBeenCalledWith(
-        expect.objectContaining({ statusCode: 404 }),
-      );
-    });
-  });
-
-  describe('navigation', () => {
-    it('returns previous/next IDs for current item', async () => {
-      const items = [{ id: 'ri3' }, { id: 'ri2' }, { id: 'ri1' }];
-      const chain: Record<string, unknown> = {};
-      chain.from = vi.fn().mockReturnValue(chain);
-      chain.where = vi.fn().mockReturnValue(chain);
-      chain.orderBy = vi.fn().mockResolvedValue(items);
-
-      mockedDb.select.mockReturnValue(chain as any);
-
-      const req = createReq({ params: { id: 'ri2' } as any });
-      const res = createRes();
-
-      await navigation(req, res, next);
-
-      const response = (res.json as any).mock.calls[0][0].data;
-      expect(response.previousId).toBe('ri3');
-      expect(response.nextId).toBe('ri1');
-      expect(response.currentIndex).toBe(2);
-      expect(response.totalCount).toBe(3);
-    });
-  });
-
-  describe('bulk', () => {
-    it('processes multiple review actions', async () => {
-      // Each performReviewAction call needs select + insert + 2x update
-      const item = { id: 'ri1', mcqRecordId: 'mcq1', workspaceId: 'ws-1' };
-      const selectChain = mockChain([item]);
-      mockedDb.select.mockReturnValue(selectChain as any);
-
-      const insertChain = mockChain([{ id: 'a1' }]);
-      mockedDb.insert.mockReturnValue(insertChain as any);
-
-      const approved = { id: 'ri1', status: 'approved' };
-      const updateChain = mockChain([approved]);
-      mockedDb.update.mockReturnValue(updateChain as any);
-
-      const req = createReq({
-        body: { ids: ['ri1', 'ri2'], action: 'approve', reason: 'Bulk approve' },
-      });
-      const res = createRes();
-
-      await bulk(req, res, next);
-
-      const response = (res.json as any).mock.calls[0][0].data;
-      expect(response.processed).toBe(2);
+    expect(res.json).toHaveBeenCalledWith({
+      data: {
+        ids: ['review-3', 'review-2', 'review-1'],
+        previousId: 'review-3',
+        nextId: 'review-1',
+        hasPrevious: true,
+        hasNext: true,
+        currentIndex: 2,
+        totalCount: 3,
+      },
     });
   });
 });

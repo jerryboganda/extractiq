@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import { eq, and, count, desc } from 'drizzle-orm';
-import { db, documents } from '@mcq-platform/db';
+import { db, documents, projects } from '@mcq-platform/db';
 import { getPresignedUploadUrl, buildDocumentKey } from '@mcq-platform/storage';
 import { AppError } from '../../middleware/error-handler.js';
 import { v4 as uuidv4 } from 'uuid';
@@ -11,8 +11,20 @@ export async function list(req: Request, res: Response, next: NextFunction) {
     const offset = (page - 1) * limit;
 
     const items = await db
-      .select()
+      .select({
+        id: documents.id,
+        filename: documents.filename,
+        status: documents.status,
+        pageCount: documents.pageCount,
+        fileSize: documents.fileSize,
+        mcqCount: documents.mcqCount,
+        confidenceAvg: documents.confidenceAvg,
+        createdAt: documents.createdAt,
+        projectId: documents.projectId,
+        projectName: projects.name,
+      })
       .from(documents)
+      .innerJoin(projects, eq(projects.id, documents.projectId))
       .where(eq(documents.workspaceId, req.workspaceId))
       .orderBy(desc(documents.createdAt))
       .limit(limit)
@@ -25,7 +37,18 @@ export async function list(req: Request, res: Response, next: NextFunction) {
 
     res.json({
       data: {
-        items,
+        items: items.map((item) => ({
+          id: item.id,
+          filename: item.filename,
+          status: item.status,
+          pages: item.pageCount ?? 0,
+          uploadDate: item.createdAt.toISOString(),
+          mcqCount: item.mcqCount,
+          confidence: Math.round((item.confidenceAvg ?? 0) * 100),
+          size: `${(item.fileSize / (1024 * 1024)).toFixed(1)} MB`,
+          project: item.projectName,
+          projectId: item.projectId,
+        })),
         total,
         page,
         limit,
@@ -41,7 +64,16 @@ export async function presignUpload(req: Request, res: Response, next: NextFunct
   try {
     const { filename, contentType, fileSize, projectId } = req.body;
 
-    // Validate project belongs to workspace
+    const [project] = await db
+      .select({ id: projects.id })
+      .from(projects)
+      .where(and(eq(projects.id, projectId), eq(projects.workspaceId, req.workspaceId)))
+      .limit(1);
+
+    if (!project) {
+      throw new AppError(404, 'PROJECT_NOT_FOUND', 'Project not found');
+    }
+
     const documentId = uuidv4();
     const s3Key = buildDocumentKey(req.workspaceId, documentId, filename);
 
@@ -87,10 +119,10 @@ export async function completeUpload(req: Request, res: Response, next: NextFunc
     const [doc] = await db
       .update(documents)
       .set({
-        status: 'preprocessing',
+        status: 'uploaded',
         checksumSha256: checksumSha256 ?? null,
       })
-      .where(and(eq(documents.id, uploadId), eq(documents.workspaceId, req.workspaceId)))
+      .where(and(eq(documents.id, uploadId), eq(documents.workspaceId, req.workspaceId), eq(documents.s3Key, s3Key)))
       .returning();
 
     if (!doc) throw new AppError(404, 'NOT_FOUND', 'Document not found');

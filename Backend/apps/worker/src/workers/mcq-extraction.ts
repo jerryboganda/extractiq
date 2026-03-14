@@ -1,6 +1,7 @@
 import type { Job } from 'bullmq';
 import type { McqExtractionPayload, ValidationPayload } from '@mcq-platform/queue';
 import { enqueue, QUEUE_NAMES } from '@mcq-platform/queue';
+import { decryptProviderSecret } from '@mcq-platform/auth';
 import {
   db,
   segments,
@@ -12,9 +13,7 @@ import {
   jobTasks,
 } from '@mcq-platform/db';
 import { createLogger } from '@mcq-platform/logger';
-import { env } from '@mcq-platform/config';
 import { eq, inArray } from 'drizzle-orm';
-import crypto from 'node:crypto';
 
 const logger = createLogger('worker:mcq-extraction');
 
@@ -63,7 +62,7 @@ export async function processMcqExtraction(job: Job<McqExtractionPayload>) {
 
   // Gather input text
   let inputText = '';
-  let extractionPathway: 'ocr_then_llm' | 'vlm_direct' = 'ocr_then_llm';
+  let extractionPathway: 'ocr_llm' | 'vlm_direct' = 'ocr_llm';
 
   if (vlmOutputId) {
     // VLM pathway — use VLM output as structured input
@@ -92,7 +91,7 @@ export async function processMcqExtraction(job: Job<McqExtractionPayload>) {
     return;
   }
 
-  const apiKey = decryptApiKey(provider.apiKeyEncrypted);
+  const apiKey = decryptProviderSecret(provider.apiKeyEncrypted);
 
   // Call LLM
   let extractedMcqs: ExtractedMcq[] = [];
@@ -105,7 +104,7 @@ export async function processMcqExtraction(job: Job<McqExtractionPayload>) {
     case 'anthropic':
       ({ mcqs: extractedMcqs, costUsd } = await callAnthropic(apiKey, inputText, extractionPathway));
       break;
-    case 'google_gemini':
+    case 'google':
       ({ mcqs: extractedMcqs, costUsd } = await callGemini(apiKey, inputText, extractionPathway));
       break;
     default:
@@ -367,27 +366,7 @@ function getModelName(providerType: string): string {
   const models: Record<string, string> = {
     openai: 'gpt-4o',
     anthropic: 'claude-3.5-sonnet',
-    google_gemini: 'gemini-2.0-flash',
+    google: 'gemini-2.0-flash',
   };
   return models[providerType] ?? providerType;
-}
-
-function decryptApiKey(encrypted: string): string {
-  const [ivHex, authTagHex, cipherTextHex] = encrypted.split(':');
-  if (!ivHex || !authTagHex || !cipherTextHex) {
-    throw new Error('Invalid encrypted API key format');
-  }
-
-  const key = Buffer.from(env.ENCRYPTION_KEY, 'hex');
-  const iv = Buffer.from(ivHex, 'hex');
-  const authTag = Buffer.from(authTagHex, 'hex');
-  const cipherText = Buffer.from(cipherTextHex, 'hex');
-
-  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
-  decipher.setAuthTag(authTag);
-
-  let decrypted = decipher.update(cipherText, undefined, 'utf8');
-  decrypted += decipher.final('utf8');
-
-  return decrypted;
 }

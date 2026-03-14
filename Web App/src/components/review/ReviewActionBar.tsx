@@ -4,9 +4,12 @@ import { toast } from "sonner";
 
 interface ReviewActionBarProps {
   onNavigate: (direction: "prev" | "next") => void;
+  onApprove?: () => void;
+  onReject?: () => void;
+  onFlag?: () => void;
 }
 
-export function ReviewActionBar({ onNavigate }: ReviewActionBarProps) {
+export function ReviewActionBar({ onNavigate, onApprove, onReject, onFlag }: ReviewActionBarProps) {
   const handleAction = (action: string) => {
     const messages: Record<string, string> = {
       approve: "✅ MCQ approved successfully",
@@ -14,6 +17,19 @@ export function ReviewActionBar({ onNavigate }: ReviewActionBarProps) {
       flag: "🚩 MCQ flagged for review",
       skip: "⏭ Skipped to next MCQ",
     };
+    if (action === "approve" && onApprove) {
+      onApprove();
+      return;
+    }
+    if (action === "reject" && onReject) {
+      onReject();
+      return;
+    }
+    if (action === "flag" && onFlag) {
+      onFlag();
+      return;
+    }
+
     toast(messages[action] || action);
     if (action === "skip") onNavigate("next");
   };

@@ -49,7 +49,7 @@ export async function processDocumentPreprocessing(job: Job<DocumentPreprocessin
           pageNumber: i,
           pageType: 'question',
           textLayerPresent: pdfData.text.length > 0 ? 'true' : 'false',
-          routingDecision: pdfData.text.length > 0 ? 'ocr_then_llm' : 'vlm_direct',
+          routingDecision: pdfData.text.length > 0 ? 'ocr_llm' : 'vlm_direct',
           rawText: null, // Will be populated by OCR
         }).returning();
 

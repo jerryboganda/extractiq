@@ -236,7 +236,7 @@ function validateLanguage(record: typeof mcqRecords.$inferSelect, flags: string[
   const text = record.questionText ?? '';
 
   // Simple heuristic: check for excessive non-Latin characters
-  const nonLatinRatio = (text.match(/[^\x00-\x7F]/g) ?? []).length / Math.max(text.length, 1);
+  const nonLatinRatio = (text.match(/[^\u0000-\u007F]/g) ?? []).length / Math.max(text.length, 1);
   if (nonLatinRatio > 0.5 && record.language === 'en') {
     flags.push('possible_language_mismatch');
     return 0.5;
@@ -250,7 +250,7 @@ function validateFormatting(record: typeof mcqRecords.$inferSelect, flags: strin
   const text = record.questionText ?? '';
 
   // Check for garbage characters (common OCR artifacts)
-  const garbagePatterns = /[\x00-\x08\x0E-\x1F\x7F-\x9F]{3,}/;
+  const garbagePatterns = /[\u0000-\u0008\u000E-\u001F\u007F-\u009F]{3,}/;
   if (garbagePatterns.test(text)) {
     flags.push('garbage_characters');
     score -= 0.3;

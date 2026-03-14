@@ -1,10 +1,10 @@
 import type { Job } from 'bullmq';
 import type { ProviderHealthCheckPayload } from '@mcq-platform/queue';
 import { db, providerConfigs } from '@mcq-platform/db';
+import { decryptProviderSecret } from '@mcq-platform/auth';
 import { createLogger } from '@mcq-platform/logger';
 import { env } from '@mcq-platform/config';
 import { eq } from 'drizzle-orm';
-import crypto from 'node:crypto';
 
 const logger = createLogger('worker:provider-health-check');
 
@@ -16,7 +16,7 @@ const logger = createLogger('worker:provider-health-check');
  * health status in the database.
  */
 export async function processProviderHealthCheck(job: Job<ProviderHealthCheckPayload>) {
-  const { providerConfigId, workspaceId } = job.data;
+  const { providerConfigId } = job.data;
   logger.info({ providerConfigId }, 'Starting provider health check');
 
   const [provider] = await db
@@ -34,7 +34,7 @@ export async function processProviderHealthCheck(job: Job<ProviderHealthCheckPay
   let latencyMs: number;
 
   try {
-    const apiKey = decryptApiKey(provider.apiKeyEncrypted);
+    const apiKey = decryptProviderSecret(provider.apiKeyEncrypted);
     const startTime = Date.now();
 
     const isHealthy = await checkProvider(provider.providerType, apiKey);
@@ -43,10 +43,10 @@ export async function processProviderHealthCheck(job: Job<ProviderHealthCheckPay
     if (isHealthy) {
       healthStatus = latencyMs > 5000 ? 'degraded' : 'healthy';
     } else {
-      healthStatus = 'unhealthy';
+      healthStatus = 'offline';
     }
   } catch (err) {
-    healthStatus = 'unhealthy';
+    healthStatus = 'offline';
     latencyMs = 0;
     logger.warn({ providerConfigId, error: (err as Error).message }, 'Health check failed');
   }
@@ -76,9 +76,9 @@ async function checkProvider(providerType: string, apiKey: string): Promise<bool
         return await checkOpenAi(apiKey, controller.signal);
       case 'anthropic':
         return await checkAnthropic(apiKey, controller.signal);
-      case 'google_gemini':
+      case 'google':
         return await checkGemini(apiKey, controller.signal);
-      case 'mistral_ocr':
+      case 'mistral':
         return await checkMistral(apiKey, controller.signal);
       case 'qwen_vl':
         return await checkQwenVl(controller.signal);
@@ -155,22 +155,3 @@ async function checkGlmOcr(signal: AbortSignal): Promise<boolean> {
 // Decrypt provider API key (AES-256-GCM)
 // ──────────────────────────────────────────────
 
-function decryptApiKey(encrypted: string): string {
-  const [ivHex, authTagHex, cipherTextHex] = encrypted.split(':');
-  if (!ivHex || !authTagHex || !cipherTextHex) {
-    throw new Error('Invalid encrypted API key format');
-  }
-
-  const key = Buffer.from(env.ENCRYPTION_KEY, 'hex');
-  const iv = Buffer.from(ivHex, 'hex');
-  const authTag = Buffer.from(authTagHex, 'hex');
-  const cipherText = Buffer.from(cipherTextHex, 'hex');
-
-  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
-  decipher.setAuthTag(authTag);
-
-  let decrypted = decipher.update(cipherText, undefined, 'utf8');
-  decrypted += decipher.final('utf8');
-
-  return decrypted;
-}

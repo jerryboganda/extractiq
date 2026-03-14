@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Menu, ChevronDown, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -31,6 +31,77 @@ const moreLinks = [
   { label: "About", href: "/about" },
   { label: "Blog", href: "/blog" },
 ];
+
+function HoverDropdown({
+  label,
+  links,
+  isActive,
+  isGroupActive,
+}: {
+  label: string;
+  links: Array<{ label: string; href: string }>;
+  isActive: (href: string) => boolean;
+  isGroupActive: (links: Array<{ label: string; href: string }>) => boolean;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const closeTimeoutRef = useRef<number | null>(null);
+
+  const clearCloseTimeout = () => {
+    if (closeTimeoutRef.current !== null) {
+      window.clearTimeout(closeTimeoutRef.current);
+      closeTimeoutRef.current = null;
+    }
+  };
+
+  const openMenu = () => {
+    clearCloseTimeout();
+    setIsOpen(true);
+  };
+
+  const closeMenu = () => {
+    clearCloseTimeout();
+    closeTimeoutRef.current = window.setTimeout(() => {
+      setIsOpen(false);
+      closeTimeoutRef.current = null;
+    }, 120);
+  };
+
+  useEffect(() => () => clearCloseTimeout(), []);
+
+  return (
+    <div
+      onMouseEnter={openMenu}
+      onMouseLeave={closeMenu}
+      onFocus={openMenu}
+      onBlur={closeMenu}
+    >
+      <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>
+        <DropdownMenuTrigger
+          className={cn(
+            "text-sm transition-colors flex items-center gap-1 outline-none",
+            isGroupActive(links) ? "text-primary font-medium" : "text-muted-foreground hover:text-foreground",
+          )}
+          aria-expanded={isOpen}
+        >
+          {label} <ChevronDown className={cn("w-3.5 h-3.5 transition-transform", isOpen && "rotate-180")} />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="start"
+          className="bg-card border-border"
+          onCloseAutoFocus={(event) => event.preventDefault()}
+        >
+          {links.map((link) => (
+            <DropdownMenuItem key={link.href} asChild onSelect={() => setIsOpen(false)}>
+              <Link to={link.href} className={cn("cursor-pointer", isActive(link.href) && "text-primary")}>
+                {link.label}
+              </Link>
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+}
 
 const Navbar = () => {
   const [scrolled, setScrolled] = useState(false);
@@ -82,23 +153,12 @@ const Navbar = () => {
             ))}
 
             {/* Solutions Dropdown */}
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                className={cn(
-                  "text-sm transition-colors flex items-center gap-1 outline-none",
-                  isGroupActive(solutionLinks) ? "text-primary font-medium" : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                Solutions <ChevronDown className="w-3.5 h-3.5" />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="bg-card border-border">
-                {solutionLinks.map((link) => (
-                  <DropdownMenuItem key={link.href} asChild>
-                    <Link to={link.href} className={cn("cursor-pointer", isActive(link.href) && "text-primary")}>{link.label}</Link>
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <HoverDropdown
+              label="Solutions"
+              links={solutionLinks}
+              isActive={isActive}
+              isGroupActive={isGroupActive}
+            />
 
             {navLinks.slice(2).map((link) => (
               <Link
@@ -114,27 +174,16 @@ const Navbar = () => {
             ))}
 
             {/* More Dropdown */}
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                className={cn(
-                  "text-sm transition-colors flex items-center gap-1 outline-none",
-                  isGroupActive(moreLinks) ? "text-primary font-medium" : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                More <ChevronDown className="w-3.5 h-3.5" />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="bg-card border-border">
-                {moreLinks.map((link) => (
-                  <DropdownMenuItem key={link.href} asChild>
-                    <Link to={link.href} className={cn("cursor-pointer", isActive(link.href) && "text-primary")}>{link.label}</Link>
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <HoverDropdown
+              label="More"
+              links={moreLinks}
+              isActive={isActive}
+              isGroupActive={isGroupActive}
+            />
           </nav>
 
           <div className="hidden lg:flex items-center gap-3">
-            <a href="/app/login">
+            <a href={import.meta.env.VITE_APP_URL || '/app/login'}>
               <Button variant="ghost" className="text-muted-foreground hover:text-foreground">
                 Login
               </Button>
@@ -195,7 +244,7 @@ const Navbar = () => {
                     {link.label}
                   </Link>
                 ))}
-                <a href="/app/login" onClick={() => setOpen(false)}>
+                <a href={import.meta.env.VITE_APP_URL || '/app/login'} onClick={() => setOpen(false)}>
                   <Button variant="outline" className="w-full mt-4">
                     Login
                   </Button>

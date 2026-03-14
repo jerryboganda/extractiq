@@ -12,7 +12,7 @@ interface StatCardProps {
   trend: number;
   icon: LucideIcon;
   color: string;
-  sparklineData: number[];
+  sparklineData?: number[];
   delay?: number;
   decimals?: number;
 }

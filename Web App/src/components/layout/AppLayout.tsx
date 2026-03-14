@@ -7,7 +7,6 @@ import { AppHeader } from "./AppHeader";
 import { CommandPalette } from "@/components/CommandPalette";
 import { KeyboardShortcutsDialog } from "@/components/KeyboardShortcutsDialog";
 import { PageTransition } from "@/components/PageTransition";
-import { OnboardingChecklist } from "@/components/OnboardingChecklist";
 import { useKeySequence } from "@/hooks/use-key-sequence";
 
 interface AppLayoutProps {
@@ -67,7 +66,6 @@ export function AppLayout({ children }: AppLayoutProps) {
       </div>
       <CommandPalette onOpenShortcuts={() => setShortcutsOpen(true)} />
       <KeyboardShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
-      <OnboardingChecklist />
     </SidebarProvider>
   );
 }

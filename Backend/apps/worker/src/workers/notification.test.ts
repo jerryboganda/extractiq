@@ -1,13 +1,48 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const { sendMail } = vi.hoisted(() => ({
+  sendMail: vi.fn(),
+}));
 
 vi.mock('@mcq-platform/db', () => ({
-  db: { select: vi.fn(), insert: vi.fn() },
-  notifications: 'notifications_table',
-  users: 'users_table',
+  db: {
+    select: vi.fn(),
+    insert: vi.fn(),
+    update: vi.fn(),
+  },
+  notifications: { id: 'notifications.id', userId: 'notifications.userId' },
+  users: { id: 'users.id', workspaceId: 'users.workspaceId', status: 'users.status' },
+  emailDeliveries: { id: 'emailDeliveries.id' },
+}));
+
+vi.mock('@mcq-platform/config', () => ({
+  env: {
+    SMTP_HOST: '127.0.0.1',
+    SMTP_PORT: 1025,
+    SMTP_SECURE: false,
+    SMTP_USER: '',
+    SMTP_PASS: '',
+    SMTP_FROM_NAME: 'ExtractIQ Document Intelligence',
+    SMTP_FROM: 'noreply@extractiq.local',
+    ENABLE_EMAIL_DELIVERY: true,
+  },
+}));
+
+vi.mock('nodemailer', () => ({
+  default: {
+    createTransport: vi.fn(() => ({
+      sendMail,
+    })),
+  },
 }));
 
 vi.mock('@mcq-platform/logger', () => ({
-  createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
+  createLogger: () => ({
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+  }),
 }));
 
 import { processNotification } from './notification.js';
@@ -15,72 +50,88 @@ import { db } from '@mcq-platform/db';
 
 const mockedDb = vi.mocked(db);
 
+function createJob(data: Record<string, unknown>) {
+  return {
+    id: 'job-1',
+    name: 'notification',
+    data,
+  } as any;
+}
+
 function mockChain(result: unknown) {
   const chain: Record<string, unknown> = {};
   chain.from = vi.fn().mockReturnValue(chain);
   chain.where = vi.fn().mockReturnValue(chain);
-  chain.limit = vi.fn().mockReturnValue(chain);
   chain.values = vi.fn().mockReturnValue(chain);
-  chain.then = vi.fn().mockImplementation((resolve: any) => resolve(result));
+  chain.returning = vi.fn().mockResolvedValue(result);
+  chain.set = vi.fn().mockReturnValue(chain);
+  chain.then = vi.fn().mockImplementation((resolve: (value: unknown) => unknown) => resolve(result));
   return chain;
 }
 
-function createJob(data: any) {
-  return { data, id: 'job-id-1', name: 'notification' } as any;
-}
-
 describe('notification worker', () => {
-  beforeEach(() => { vi.clearAllMocks(); });
+  beforeEach(() => {
+    vi.clearAllMocks();
+    sendMail.mockResolvedValue({});
+  });
 
-  it('creates notification for specific user', async () => {
-    const insertChain = mockChain(undefined);
-    mockedDb.insert.mockReturnValue(insertChain as any);
+  it('creates a database notification for a specific user', async () => {
+    mockedDb.insert.mockReturnValueOnce(mockChain([{ id: 'notif-1', userId: 'user-1' }]) as never);
 
     await processNotification(createJob({
       workspaceId: 'ws-1',
       userId: 'user-1',
       type: 'job_completed',
-      title: 'Job Done',
-      message: 'Your job is complete',
-      data: { jobId: 'j1' },
+      title: 'Job complete',
+      message: 'Your job finished successfully',
     }));
 
     expect(mockedDb.insert).toHaveBeenCalled();
-    // Should not query for users since userId was provided
     expect(mockedDb.select).not.toHaveBeenCalled();
   });
 
-  it('broadcasts to all active workspace users when no userId', async () => {
-    const users = [{ id: 'u1' }, { id: 'u2' }, { id: 'u3' }];
-    mockedDb.select.mockReturnValue(mockChain(users) as any);
-    mockedDb.insert.mockReturnValue(mockChain(undefined) as any);
+  it('broadcasts notifications and sends tracked emails when requested', async () => {
+    mockedDb.select.mockReturnValueOnce(mockChain([{ id: 'user-1' }, { id: 'user-2' }]) as never);
+    mockedDb.insert
+      .mockReturnValueOnce(mockChain([{ id: 'notif-1', userId: 'user-1' }, { id: 'notif-2', userId: 'user-2' }]) as never)
+      .mockReturnValueOnce(mockChain([{ id: 'delivery-1' }]) as never);
+    mockedDb.update.mockReturnValue(mockChain([]) as never);
 
     await processNotification(createJob({
       workspaceId: 'ws-1',
-      userId: '',
-      type: 'system_update',
-      title: 'Update',
-      message: 'System updated',
+      type: 'user_invited',
+      title: 'Invite sent',
+      message: 'Invitation sent successfully',
+      emails: [{
+        to: 'invitee@example.com',
+        subject: 'Accept your invitation',
+        text: 'Invitation body',
+        html: '<p>Invitation body</p>',
+      }],
+      relatedType: 'invitation',
+      relatedId: 'user-2',
     }));
 
-    // Should have queried for workspace users
     expect(mockedDb.select).toHaveBeenCalled();
-    // Should insert notifications for all 3 users
-    expect(mockedDb.insert).toHaveBeenCalled();
+    expect(sendMail).toHaveBeenCalledWith(expect.objectContaining({
+      from: 'ExtractIQ Document Intelligence <noreply@extractiq.local>',
+      to: 'invitee@example.com',
+      subject: 'Accept your invitation',
+    }));
+    expect(mockedDb.update).toHaveBeenCalled();
   });
 
-  it('skips when no target users found', async () => {
-    mockedDb.select.mockReturnValue(mockChain([]) as any);
+  it('skips work when no recipients exist', async () => {
+    mockedDb.select.mockReturnValueOnce(mockChain([]) as never);
 
     await processNotification(createJob({
       workspaceId: 'ws-1',
-      userId: '',
       type: 'system_update',
       title: 'Update',
-      message: 'No users',
+      message: 'No active users available',
     }));
 
-    // No users → should not insert
     expect(mockedDb.insert).not.toHaveBeenCalled();
+    expect(sendMail).not.toHaveBeenCalled();
   });
 });

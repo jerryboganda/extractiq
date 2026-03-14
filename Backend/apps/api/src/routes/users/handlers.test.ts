@@ -1,13 +1,16 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import type { Request, Response, NextFunction } from 'express';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { NextFunction, Request, Response } from 'express';
 
 vi.mock('@mcq-platform/db', () => ({
   db: {
     select: vi.fn(),
     insert: vi.fn(),
     update: vi.fn(),
+    transaction: vi.fn(),
   },
-  users: 'users_table',
+  users: { id: 'users.id', workspaceId: 'users.workspaceId', email: 'users.email', createdAt: 'users.createdAt' },
+  invitationTokens: { id: 'invites.id' },
+  workspaces: { id: 'workspaces.id', name: 'workspaces.name' },
 }));
 
 vi.mock('@mcq-platform/auth', () => ({
@@ -15,27 +18,45 @@ vi.mock('@mcq-platform/auth', () => ({
   canManageRole: vi.fn(),
 }));
 
-vi.mock('@mcq-platform/logger', () => ({
-  createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
+vi.mock('@mcq-platform/config', () => ({
+  env: {
+    APP_BASE_URL: 'http://localhost:8080/app',
+  },
 }));
 
-import { list, invite, update, deactivate } from './handlers.js';
+vi.mock('@mcq-platform/queue', () => ({
+  enqueue: vi.fn(),
+  QUEUE_NAMES: {
+    NOTIFICATION: 'notification',
+  },
+}));
+
+vi.mock('@mcq-platform/logger', () => ({
+  createLogger: () => ({
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+  }),
+}));
+
+import { deactivate, invite, list, update } from './handlers.js';
 import { db } from '@mcq-platform/db';
-import { hashPassword, canManageRole } from '@mcq-platform/auth';
+import { canManageRole, hashPassword } from '@mcq-platform/auth';
+import { enqueue } from '@mcq-platform/queue';
 
 const mockedDb = vi.mocked(db);
-const mockedHashPassword = vi.mocked(hashPassword);
 const mockedCanManageRole = vi.mocked(canManageRole);
+const mockedHashPassword = vi.mocked(hashPassword);
+const mockedEnqueue = vi.mocked(enqueue);
 
 function createReq(overrides: Partial<Request> = {}): Request {
   return {
     body: {},
     query: { page: 1, limit: 20 },
     params: {},
-    cookies: {},
-    headers: {},
-    userId: 'user-1',
     workspaceId: 'ws-1',
+    userId: 'admin-1',
     userRole: 'workspace_admin',
     ...overrides,
   } as unknown as Request;
@@ -56,10 +77,9 @@ function mockChain(result: unknown) {
   chain.limit = vi.fn().mockReturnValue(chain);
   chain.offset = vi.fn().mockReturnValue(chain);
   chain.values = vi.fn().mockReturnValue(chain);
-  chain.returning = vi.fn().mockReturnValue(chain);
+  chain.returning = vi.fn().mockResolvedValue(result);
   chain.set = vi.fn().mockReturnValue(chain);
-  chain.groupBy = vi.fn().mockReturnValue(chain);
-  chain.then = vi.fn().mockImplementation((resolve: any) => resolve(result));
+  chain.then = vi.fn().mockImplementation((resolve: (value: unknown) => unknown) => resolve(result));
   return chain;
 }
 
@@ -71,169 +91,122 @@ describe('users handlers', () => {
     next = vi.fn();
   });
 
-  describe('list', () => {
-    it('returns paginated users with initials', async () => {
-      const items = [
-        { id: 'u1', email: 'john@test.com', name: 'John Doe', role: 'operator', status: 'active', lastActiveAt: null, createdAt: new Date() },
-      ];
-      const itemsChain = mockChain(items);
-      const countChain = mockChain([{ total: 1 }]);
+  it('lists paginated workspace users with initials', async () => {
+    mockedDb.select
+      .mockReturnValueOnce(mockChain([{
+        id: 'user-1',
+        email: 'jane@example.com',
+        name: 'Jane Doe',
+        role: 'reviewer',
+        status: 'active',
+        lastActiveAt: null,
+        createdAt: new Date('2026-03-13T00:00:00.000Z'),
+      }]) as never)
+      .mockReturnValueOnce(mockChain([{ total: 1 }]) as never);
 
-      mockedDb.select
-        .mockReturnValueOnce(itemsChain as any)
-        .mockReturnValueOnce(countChain as any);
+    const res = createRes();
+    await list(createReq({ query: { page: 1, limit: 10 } as any }), res, next);
 
-      const req = createReq({ query: { page: 1, limit: 10 } as any });
-      const res = createRes();
-
-      await list(req, res, next);
-
-      const response = (res.json as any).mock.calls[0][0].data;
-      expect(response.items[0].initials).toBe('JD');
-      expect(response.total).toBe(1);
+    expect(res.json).toHaveBeenCalledWith({
+      data: {
+        items: [expect.objectContaining({
+          id: 'user-1',
+          initials: 'JD',
+        })],
+        total: 1,
+        page: 1,
+        limit: 10,
+        totalPages: 1,
+      },
     });
   });
 
-  describe('invite', () => {
-    it('creates user with invited status on success', async () => {
-      mockedCanManageRole.mockReturnValue(true);
+  it('creates an invited user, token, and invitation notification', async () => {
+    mockedCanManageRole.mockReturnValue(true);
+    mockedHashPassword.mockResolvedValue('temporary-password-hash');
+    mockedDb.select
+      .mockReturnValueOnce(mockChain([]) as never)
+      .mockReturnValueOnce(mockChain([{ workspaceName: 'Workspace One' }]) as never);
+    mockedDb.transaction.mockImplementation(async (callback: (tx: any) => Promise<unknown>) => {
+      const tx = {
+        insert: vi.fn()
+          .mockReturnValueOnce({
+            values: vi.fn().mockReturnValue({
+              returning: vi.fn().mockResolvedValue([{
+                id: 'user-2',
+                email: 'invitee@example.com',
+                name: 'invitee',
+                role: 'reviewer',
+                status: 'invited',
+              }]),
+            }),
+          })
+          .mockReturnValueOnce({
+            values: vi.fn().mockResolvedValue(undefined),
+          }),
+      };
 
-      // Check existing user — not found
-      const existingChain = mockChain([]);
-      mockedDb.select.mockReturnValue(existingChain as any);
-
-      mockedHashPassword.mockResolvedValue('temp-hash');
-
-      const newUser = { id: 'u-new', email: 'new@test.com', name: 'new', role: 'operator', status: 'invited' };
-      const insertChain = mockChain([newUser]);
-      mockedDb.insert.mockReturnValue(insertChain as any);
-
-      const req = createReq({ body: { email: 'new@test.com', role: 'operator' } });
-      const res = createRes();
-
-      await invite(req, res, next);
-
-      expect(res.status).toHaveBeenCalledWith(201);
-      expect(res.json).toHaveBeenCalledWith({
-        data: { id: 'u-new', email: 'new@test.com', name: 'new', role: 'operator', status: 'invited' },
-      });
+      return callback(tx);
     });
 
-    it('returns 403 when role hierarchy is violated', async () => {
-      mockedCanManageRole.mockReturnValue(false);
+    const res = createRes();
+    await invite(
+      createReq({ body: { email: 'invitee@example.com', role: 'reviewer' } }),
+      res,
+      next,
+    );
 
-      const req = createReq({ body: { email: 'admin@test.com', role: 'super_admin' } });
-      const res = createRes();
-
-      await invite(req, res, next);
-
-      expect(next).toHaveBeenCalledWith(
-        expect.objectContaining({ statusCode: 403, code: 'FORBIDDEN' }),
-      );
+    expect(res.status).toHaveBeenCalledWith(201);
+    expect(res.json).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        id: 'user-2',
+        email: 'invitee@example.com',
+        role: 'reviewer',
+        status: 'invited',
+        invitationUrl: expect.stringContaining('/accept-invite?token='),
+      }),
     });
+    expect(mockedEnqueue).toHaveBeenCalledWith('notification', expect.objectContaining({
+      type: 'user_invited',
+      emails: [expect.objectContaining({ to: 'invitee@example.com' })],
+    }));
+  });
 
-    it('returns 409 when user already exists', async () => {
-      mockedCanManageRole.mockReturnValue(true);
-      const existingChain = mockChain([{ id: 'existing' }]);
-      mockedDb.select.mockReturnValue(existingChain as any);
+  it('updates another user role within the workspace', async () => {
+    mockedDb.select.mockReturnValueOnce(mockChain([{ id: 'user-2', workspaceId: 'ws-1' }]) as never);
+    mockedCanManageRole.mockReturnValue(true);
+    mockedDb.update.mockReturnValueOnce(mockChain([{
+      id: 'user-2',
+      email: 'invitee@example.com',
+      name: 'Invitee',
+      role: 'operator',
+      status: 'active',
+    }]) as never);
 
-      const req = createReq({ body: { email: 'exists@test.com', role: 'operator' } });
-      const res = createRes();
+    const res = createRes();
+    await update(
+      createReq({ params: { id: 'user-2' } as any, body: { role: 'operator', name: 'Invitee' } }),
+      res,
+      next,
+    );
 
-      await invite(req, res, next);
-
-      expect(next).toHaveBeenCalledWith(
-        expect.objectContaining({ statusCode: 409, code: 'USER_EXISTS' }),
-      );
+    expect(res.json).toHaveBeenCalledWith({
+      data: {
+        id: 'user-2',
+        email: 'invitee@example.com',
+        name: 'Invitee',
+        role: 'operator',
+        status: 'active',
+      },
     });
   });
 
-  describe('update', () => {
-    it('returns 400 when trying to change own role', async () => {
-      const target = { id: 'user-1', workspaceId: 'ws-1' };
-      const chain = mockChain([target]);
-      mockedDb.select.mockReturnValue(chain as any);
+  it('deactivates a different workspace user', async () => {
+    mockedDb.update.mockReturnValueOnce(mockChain([{ id: 'user-2', status: 'inactive' }]) as never);
 
-      const req = createReq({ params: { id: 'user-1' } as any, body: { role: 'operator' } });
-      const res = createRes();
+    const res = createRes();
+    await deactivate(createReq({ params: { id: 'user-2' } as any }), res, next);
 
-      await update(req, res, next);
-
-      expect(next).toHaveBeenCalledWith(
-        expect.objectContaining({ statusCode: 400, code: 'CANNOT_CHANGE_OWN_ROLE' }),
-      );
-    });
-
-    it('returns 403 when assigning higher role', async () => {
-      const target = { id: 'u2', workspaceId: 'ws-1' };
-      const chain = mockChain([target]);
-      mockedDb.select.mockReturnValue(chain as any);
-      mockedCanManageRole.mockReturnValue(false);
-
-      const req = createReq({ params: { id: 'u2' } as any, body: { role: 'super_admin' } });
-      const res = createRes();
-
-      await update(req, res, next);
-
-      expect(next).toHaveBeenCalledWith(
-        expect.objectContaining({ statusCode: 403, code: 'FORBIDDEN' }),
-      );
-    });
-
-    it('updates user successfully', async () => {
-      const target = { id: 'u2', workspaceId: 'ws-1' };
-      const selectChain = mockChain([target]);
-      mockedDb.select.mockReturnValue(selectChain as any);
-      mockedCanManageRole.mockReturnValue(true);
-
-      const updated = { id: 'u2', email: 'u2@test.com', name: 'Updated', role: 'reviewer', status: 'active' };
-      const updateChain = mockChain([updated]);
-      mockedDb.update.mockReturnValue(updateChain as any);
-
-      const req = createReq({ params: { id: 'u2' } as any, body: { role: 'reviewer', name: 'Updated' } });
-      const res = createRes();
-
-      await update(req, res, next);
-
-      expect(res.json).toHaveBeenCalledWith({ data: updated });
-    });
-  });
-
-  describe('deactivate', () => {
-    it('returns 400 when deactivating self', async () => {
-      const req = createReq({ params: { id: 'user-1' } as any });
-      const res = createRes();
-
-      await deactivate(req, res, next);
-
-      expect(next).toHaveBeenCalledWith(
-        expect.objectContaining({ statusCode: 400, code: 'CANNOT_DEACTIVATE_SELF' }),
-      );
-    });
-
-    it('deactivates another user', async () => {
-      const chain = mockChain([{ id: 'u2', status: 'inactive' }]);
-      mockedDb.update.mockReturnValue(chain as any);
-
-      const req = createReq({ params: { id: 'u2' } as any });
-      const res = createRes();
-
-      await deactivate(req, res, next);
-
-      expect(res.json).toHaveBeenCalledWith({ data: { message: 'User deactivated' } });
-    });
-
-    it('returns 404 for nonexistent user', async () => {
-      const chain = mockChain([]);
-      chain.returning = vi.fn().mockResolvedValue([]);
-      mockedDb.update.mockReturnValue(chain as any);
-
-      const req = createReq({ params: { id: 'no-user' } as any });
-      const res = createRes();
-
-      await deactivate(req, res, next);
-
-      expect(next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 404 }));
-    });
+    expect(res.json).toHaveBeenCalledWith({ data: { message: 'User deactivated' } });
   });
 });

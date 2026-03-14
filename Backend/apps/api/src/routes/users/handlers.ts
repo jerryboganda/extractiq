@@ -1,9 +1,12 @@
 import type { Request, Response, NextFunction } from 'express';
 import { eq, and, count, desc } from 'drizzle-orm';
-import { db, users } from '@mcq-platform/db';
+import { db, users, invitationTokens, workspaces } from '@mcq-platform/db';
 import { hashPassword, canManageRole } from '@mcq-platform/auth';
+import { env } from '@mcq-platform/config';
+import { enqueue, QUEUE_NAMES, type NotificationPayload } from '@mcq-platform/queue';
 import { AppError } from '../../middleware/error-handler.js';
 import crypto from 'node:crypto';
+import { buildInvitationEmail } from '../../lib/email-templates.js';
 
 export async function list(req: Request, res: Response, next: NextFunction) {
   try {
@@ -70,21 +73,66 @@ export async function invite(req: Request, res: Response, next: NextFunction) {
       throw new AppError(409, 'USER_EXISTS', 'User already exists in this workspace');
     }
 
-    // Create user with temporary password (in production, send invite email)
+    const inviteToken = crypto.randomBytes(24).toString('hex');
     const tempPassword = crypto.randomBytes(16).toString('hex');
     const passwordHash = await hashPassword(tempPassword);
+    const tokenHash = crypto.createHash('sha256').update(inviteToken).digest('hex');
 
-    const [user] = await db
-      .insert(users)
-      .values({
+    const [{ workspaceName }] = await db
+      .select({ workspaceName: workspaces.name })
+      .from(workspaces)
+      .where(eq(workspaces.id, req.workspaceId))
+      .limit(1);
+
+    const { user } = await db.transaction(async (tx) => {
+      const [createdUser] = await tx
+        .insert(users)
+        .values({
+          workspaceId: req.workspaceId,
+          email: email.toLowerCase(),
+          name: email.split('@')[0],
+          passwordHash,
+          role,
+          status: 'invited',
+        })
+        .returning();
+
+      await tx.insert(invitationTokens).values({
         workspaceId: req.workspaceId,
-        email: email.toLowerCase(),
-        name: email.split('@')[0],
-        passwordHash,
-        role,
-        status: 'invited',
-      })
-      .returning();
+        userId: createdUser.id,
+        invitedBy: req.userId,
+        tokenHash,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      });
+
+      return { user: createdUser };
+    });
+
+    const inviteUrl = `${env.APP_BASE_URL.replace(/\/$/, '')}/accept-invite?token=${inviteToken}`;
+    const inviteEmail = buildInvitationEmail({
+      workspaceName: workspaceName ?? 'ExtractIQ',
+      role,
+      inviteUrl,
+    });
+
+    await enqueue<NotificationPayload>(QUEUE_NAMES.NOTIFICATION, {
+      workspaceId: req.workspaceId,
+      userId: req.userId,
+      type: 'user_invited',
+      title: 'Invitation sent',
+      message: `Invitation sent to ${user.email}.`,
+      data: { invitedUserId: user.id, invitedEmail: user.email, role: user.role },
+      emails: [
+        {
+          to: user.email,
+          subject: inviteEmail.subject,
+          text: inviteEmail.text,
+          html: inviteEmail.html,
+        },
+      ],
+      relatedType: 'invitation',
+      relatedId: user.id,
+    });
 
     res.status(201).json({
       data: {
@@ -93,6 +141,7 @@ export async function invite(req: Request, res: Response, next: NextFunction) {
         name: user.name,
         role: user.role,
         status: user.status,
+        invitationUrl: inviteUrl,
       },
     });
   } catch (err) {
