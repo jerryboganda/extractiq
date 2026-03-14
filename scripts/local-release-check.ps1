@@ -52,7 +52,7 @@ try {
   }
 
   Invoke-Step "Run database migrations inside the API container" {
-    docker compose -f docker-compose.local.yml exec -T api npm run db:migrate
+    docker compose -f docker-compose.local.yml exec -T api npm run db:migrate:runtime
   }
 
   Invoke-Step "Seed deterministic smoke data" {

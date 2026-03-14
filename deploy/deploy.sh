@@ -1,127 +1,135 @@
 #!/bin/bash
 set -euo pipefail
 
-# ─── ExtractIQ Production Deployment Script ───
-# Run on VPS: bash deploy/deploy.sh
-
 APP_DIR="${APP_DIR:-/root/extractiq}"
-REPO_URL="git@github.com:jerryboganda/extractiq.git"
-NGINX_CONF="/etc/nginx/sites-available/extractiq.conf"
-NGINX_LINK="/etc/nginx/sites-enabled/extractiq.conf"
-WEB_ROOT="/var/www/extractiq"
+REPO_URL="${REPO_URL:-git@github.com:jerryboganda/extractiq.git}"
+BRANCH="${BRANCH:-main}"
 
-echo "═══════════════════════════════════════"
-echo "  ExtractIQ Deployment"
-echo "═══════════════════════════════════════"
+ROOT_ENV_FILE=".env"
+BACKEND_ENV_FILE="Backend/.env"
+COMPOSE_FILES=(-f docker-compose.prod.yml)
 
-# ── 1. System dependencies ──
-echo "[1/8] Installing system dependencies..."
+log() {
+  printf '\n==> %s\n' "$1"
+}
+
+die() {
+  printf '\nERROR: %s\n' "$1" >&2
+  exit 1
+}
+
+require_command() {
+  command -v "$1" >/dev/null 2>&1 || die "Required command not found: $1"
+}
+
+require_file() {
+  local path="$1"
+  [ -f "$path" ] || die "Required file is missing: $path"
+}
+
+require_env_value() {
+  local path="$1"
+  local key="$2"
+  local value
+
+  value="$(grep -E "^${key}=" "$path" | tail -n 1 | cut -d'=' -f2- || true)"
+  [ -n "$value" ] || die "Missing required setting ${key} in ${path}"
+}
+
+wait_for_http() {
+  local url="$1"
+  local label="$2"
+  local timeout_seconds="${3:-180}"
+  local deadline=$((SECONDS + timeout_seconds))
+
+  until curl --silent --show-error --fail "$url" >/dev/null 2>&1; do
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      die "Timed out waiting for ${label} at ${url}"
+    fi
+    sleep 3
+  done
+}
+
+wait_for_ready() {
+  local url="$1"
+  local timeout_seconds="${2:-180}"
+  local deadline=$((SECONDS + timeout_seconds))
+
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    local status
+    status="$(curl --silent "$url" | sed -n 's/.*"status":"\([^"]*\)".*/\1/p' || true)"
+    if [ "$status" = "ready" ]; then
+      return 0
+    fi
+    sleep 3
+  done
+
+  die "Timed out waiting for readiness at ${url}"
+}
+
+log "Installing deployment prerequisites"
 apt-get update -qq
-apt-get install -y -qq curl git nginx docker.io docker-compose-plugin > /dev/null 2>&1
+apt-get install -y -qq curl git docker.io docker-compose-plugin >/dev/null 2>&1
 
-# Install Node.js 20 if not present
-if ! command -v node &> /dev/null || [[ $(node --version | cut -d. -f1 | tr -d 'v') -lt 20 ]]; then
-    echo "Installing Node.js 20..."
-    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - > /dev/null 2>&1
-    apt-get install -y -qq nodejs > /dev/null 2>&1
-fi
+require_command docker
+require_command git
+require_command curl
 
-echo "  Node: $(node --version) | npm: $(npm --version) | Docker: $(docker --version | cut -d' ' -f3)"
-
-# ── 2. Clone / pull repo ──
-echo "[2/8] Fetching latest code..."
-if [ -d "$APP_DIR" ]; then
-    cd "$APP_DIR"
-    git fetch origin
-    git reset --hard origin/main
+log "Fetching latest code into ${APP_DIR}"
+if [ -d "${APP_DIR}/.git" ]; then
+  cd "$APP_DIR"
+  git fetch origin "$BRANCH"
+  git checkout "$BRANCH"
+  git reset --hard "origin/${BRANCH}"
 else
-    git clone "$REPO_URL" "$APP_DIR"
-    cd "$APP_DIR"
+  git clone --branch "$BRANCH" "$REPO_URL" "$APP_DIR"
+  cd "$APP_DIR"
 fi
 
-# ── 3. Backend .env ──
-echo "[3/8] Checking environment configuration..."
-if [ ! -f "$APP_DIR/Backend/.env" ]; then
-    cp "$APP_DIR/Backend/.env.example" "$APP_DIR/Backend/.env"
-    # Generate secure secrets
-    JWT_SECRET=$(openssl rand -hex 64)
-    ENCRYPTION_KEY=$(openssl rand -hex 32)
-    POSTGRES_PASSWORD=$(openssl rand -hex 24)
-    REDIS_PASSWORD=$(openssl rand -hex 24)
+log "Validating production environment files"
+require_file "$ROOT_ENV_FILE"
+require_file "$BACKEND_ENV_FILE"
 
-    sed -i "s|JWT_SECRET=.*|JWT_SECRET=${JWT_SECRET}|" "$APP_DIR/Backend/.env"
-    sed -i "s|ENCRYPTION_KEY=.*|ENCRYPTION_KEY=${ENCRYPTION_KEY}|" "$APP_DIR/Backend/.env"
-    sed -i "s|CORS_ORIGIN=.*|CORS_ORIGIN=https://extractiq.polytronx.com|" "$APP_DIR/Backend/.env"
-    sed -i "s|APP_BASE_URL=.*|APP_BASE_URL=https://extractiq.polytronx.com/app|" "$APP_DIR/Backend/.env"
-    sed -i "s|NODE_ENV=.*|NODE_ENV=production|" "$APP_DIR/Backend/.env"
-    sed -i "s|DATABASE_URL=.*|DATABASE_URL=postgresql://mcq_user:${POSTGRES_PASSWORD}@localhost:5432/mcq_platform|" "$APP_DIR/Backend/.env"
-    sed -i "s|REDIS_URL=.*|REDIS_URL=redis://:${REDIS_PASSWORD}@localhost:6379|" "$APP_DIR/Backend/.env"
+for key in POSTGRES_PASSWORD REDIS_PASSWORD S3_ACCESS_KEY S3_SECRET_KEY; do
+  require_env_value "$ROOT_ENV_FILE" "$key"
+done
 
-    # Create production env file for docker-compose
-    cat > "$APP_DIR/.env" <<EOF
-POSTGRES_USER=mcq_user
-POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-POSTGRES_DB=mcq_platform
-REDIS_PASSWORD=${REDIS_PASSWORD}
-S3_ACCESS_KEY=minioadmin
-S3_SECRET_KEY=$(openssl rand -hex 16)
-S3_BUCKET=mcq-platform
-EOF
+for key in APP_BASE_URL CORS_ORIGIN DATABASE_URL REDIS_URL S3_ENDPOINT S3_PUBLIC_ENDPOINT S3_ACCESS_KEY S3_SECRET_KEY S3_BUCKET JWT_SECRET ENCRYPTION_KEY SMTP_HOST SMTP_PORT SMTP_FROM_NAME SMTP_FROM; do
+  require_env_value "$BACKEND_ENV_FILE" "$key"
+done
 
-    echo "  ⚠ Generated new .env files with secure secrets"
-    echo "  Review $APP_DIR/Backend/.env before proceeding"
+enable_email_delivery="$(grep -E '^ENABLE_EMAIL_DELIVERY=' "$BACKEND_ENV_FILE" | tail -n 1 | cut -d'=' -f2- || true)"
+if [ "${enable_email_delivery:-true}" = "true" ]; then
+  require_env_value "$BACKEND_ENV_FILE" "SMTP_USER"
+  require_env_value "$BACKEND_ENV_FILE" "SMTP_PASS"
 fi
 
-# ── 4. Build frontends ──
-echo "[4/8] Building Website..."
-cd "$APP_DIR/Website"
-npm ci > /dev/null 2>&1
-npm run build
+if docker network inspect nginx-proxy-manager_default >/dev/null 2>&1; then
+  COMPOSE_FILES+=(-f docker-compose.prod.proxy.yml)
+fi
 
-echo "[4/8] Building Web App..."
-cd "$APP_DIR/Web App"
-npm ci > /dev/null 2>&1
-npm run build
+app_base_url="$(grep -E '^APP_BASE_URL=' "$BACKEND_ENV_FILE" | tail -n 1 | cut -d'=' -f2-)"
+cors_origin="$(grep -E '^CORS_ORIGIN=' "$BACKEND_ENV_FILE" | tail -n 1 | cut -d'=' -f2-)"
 
-# ── 5. Deploy static files ──
-echo "[5/8] Deploying static assets..."
-mkdir -p "$WEB_ROOT/website" "$WEB_ROOT/webapp"
-rm -rf "$WEB_ROOT/website/"* "$WEB_ROOT/webapp/"*
+log "Building and starting the production stack"
+docker compose "${COMPOSE_FILES[@]}" build api worker frontend
+docker compose "${COMPOSE_FILES[@]}" up -d --remove-orphans
 
-cp -r "$APP_DIR/Website/dist/"* "$WEB_ROOT/website/"
-cp -r "$APP_DIR/Web App/dist/"* "$WEB_ROOT/webapp/"
-chown -R www-data:www-data "$WEB_ROOT"
+log "Waiting for API liveness"
+wait_for_http "http://localhost:4100/api/v1/health" "API liveness"
 
-# ── 6. Configure Nginx ──
-echo "[6/8] Configuring Nginx..."
-cp "$APP_DIR/deploy/nginx/extractiq.conf" "$NGINX_CONF"
-ln -sf "$NGINX_CONF" "$NGINX_LINK"
-rm -f /etc/nginx/sites-enabled/default 2>/dev/null || true
-nginx -t
-systemctl reload nginx
+log "Running runtime-safe database migrations inside the API container"
+docker compose "${COMPOSE_FILES[@]}" exec -T api npm run db:migrate:runtime
 
-# ── 7. Start backend services ──
-echo "[7/8] Starting backend services..."
-cd "$APP_DIR"
-docker compose -f docker-compose.prod.yml up -d --build --remove-orphans
+log "Waiting for dependency readiness"
+wait_for_ready "http://localhost:4100/api/v1/health/ready"
 
-# Wait for services to be healthy
-echo "  Waiting for services..."
-sleep 15
+log "Deployment checks"
+curl --silent --show-error --fail "http://localhost:4100/api/v1/health" >/dev/null
+curl --silent --show-error --fail "http://localhost:4100/api/v1/health/ready" >/dev/null
+curl --silent --show-error --fail "http://localhost:4101/" >/dev/null
 
-# ── 8. Run database migrations & seed ──
-echo "[8/8] Running database migrations..."
-cd "$APP_DIR/Backend"
-npm ci > /dev/null 2>&1
-npx drizzle-kit migrate
-
-echo "  Skipping seed step to preserve production data integrity"
-
-echo ""
-echo "═══════════════════════════════════════"
-echo "  ✓ Deployment Complete!"
-echo "═══════════════════════════════════════"
-echo ""
-echo "  Website:  https://extractiq.polytronx.com"
-echo "  Web App:  https://extractiq.polytronx.com/app"
-echo "  API:      https://extractiq.polytronx.com/api/v1/health"
+printf '\nDeployment complete.\n'
+printf '  Website:  %s/\n' "$cors_origin"
+printf '  Web App:  %s/login\n' "$app_base_url"
+printf '  API:      %s/api/v1/health\n' "$cors_origin"

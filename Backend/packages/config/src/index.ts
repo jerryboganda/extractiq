@@ -17,8 +17,8 @@ const envSchema = z.object({
   // API Server
   API_PORT: z.coerce.number().default(4000),
   API_HOST: z.string().default('0.0.0.0'),
-  CORS_ORIGIN: z.string().default('http://localhost:8080'),
-  APP_BASE_URL: z.string().default('http://localhost:8080/app'),
+  CORS_ORIGIN: z.string().url().default('http://localhost:8080'),
+  APP_BASE_URL: z.string().url().default('http://localhost:8080/app'),
 
   // Database
   DATABASE_URL: z.string().min(1),
@@ -26,11 +26,11 @@ const envSchema = z.object({
   DB_POOL_MAX: z.coerce.number().default(10),
 
   // Redis
-  REDIS_URL: z.string().default('redis://localhost:6379'),
+  REDIS_URL: z.string().min(1).default('redis://localhost:6379'),
 
   // MinIO / S3
-  S3_ENDPOINT: z.string().default('http://localhost:9000'),
-  S3_PUBLIC_ENDPOINT: z.string().default('http://localhost:9000'),
+  S3_ENDPOINT: z.string().url().default('http://localhost:9000'),
+  S3_PUBLIC_ENDPOINT: z.string().url().default('http://localhost:9000'),
   S3_ACCESS_KEY: z.string().min(1, 'S3_ACCESS_KEY is required'),
   S3_SECRET_KEY: z.string().min(1, 'S3_SECRET_KEY is required'),
   S3_BUCKET: z.string().default('mcq-platform'),
@@ -53,13 +53,13 @@ const envSchema = z.object({
   ANTHROPIC_API_KEY: z.string().optional().default(''),
   GOOGLE_AI_API_KEY: z.string().optional().default(''),
   MISTRAL_API_KEY: z.string().optional().default(''),
-  QWEN_VL_ENDPOINT: z.string().optional().default(''),
+  QWEN_VL_ENDPOINT: z.union([z.string().url(), z.literal('')]).optional().default(''),
   QWEN_VL_API_KEY: z.string().optional().default(''),
-  GLM_OCR_ENDPOINT: z.string().optional().default(''),
+  GLM_OCR_ENDPOINT: z.union([z.string().url(), z.literal('')]).optional().default(''),
   GLM_OCR_API_KEY: z.string().optional().default(''),
 
   // Email
-  SMTP_HOST: z.string().default('127.0.0.1'),
+  SMTP_HOST: z.string().min(1).default('127.0.0.1'),
   SMTP_PORT: z.coerce.number().default(1025),
   SMTP_USER: z.string().optional().default(''),
   SMTP_PASS: z.string().optional().default(''),
@@ -80,6 +80,53 @@ const envSchema = z.object({
   MAX_FILE_SIZE_MB: z.coerce.number().default(50),
   PRESIGNED_UPLOAD_TTL_SECONDS: z.coerce.number().default(900),
   PRESIGNED_DOWNLOAD_TTL_SECONDS: z.coerce.number().default(3600),
+}).superRefine((config, ctx) => {
+  if (config.NODE_ENV !== 'production') {
+    return;
+  }
+
+  if (!config.APP_BASE_URL.startsWith('https://')) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['APP_BASE_URL'],
+      message: 'APP_BASE_URL must use https:// in production',
+    });
+  }
+
+  if (!config.CORS_ORIGIN.startsWith('https://')) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['CORS_ORIGIN'],
+      message: 'CORS_ORIGIN must use https:// in production',
+    });
+  }
+
+  const publicStorageHost = new URL(config.S3_PUBLIC_ENDPOINT).hostname;
+  if (['localhost', '127.0.0.1', 'minio'].includes(publicStorageHost)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['S3_PUBLIC_ENDPOINT'],
+      message: 'S3_PUBLIC_ENDPOINT must be browser reachable in production',
+    });
+  }
+
+  if (config.ENABLE_EMAIL_DELIVERY) {
+    if (!config.SMTP_USER.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['SMTP_USER'],
+        message: 'SMTP_USER is required when email delivery is enabled in production',
+      });
+    }
+
+    if (!config.SMTP_PASS.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['SMTP_PASS'],
+        message: 'SMTP_PASS is required when email delivery is enabled in production',
+      });
+    }
+  }
 });
 
 export type EnvConfig = z.infer<typeof envSchema>;

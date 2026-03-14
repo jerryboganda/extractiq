@@ -1,5 +1,6 @@
 param(
   [switch]$SkipBuild,
+  [switch]$SeedSmokeData,
   [switch]$SeedDemoData
 )
 
@@ -167,12 +168,12 @@ Write-Host "==> Running database migrations" -ForegroundColor Cyan
 Push-Location (Join-Path $root "Backend")
 try {
   $env:DATABASE_URL = $databaseUrl
-  npm run db:migrate
+  npm run db:migrate:runtime
 } finally {
   Pop-Location
 }
 
-if ($SeedDemoData) {
+if ($SeedSmokeData -or $SeedDemoData) {
   Write-Host "==> Seeding deterministic smoke data" -ForegroundColor Cyan
   Push-Location (Join-Path $root "Backend")
   try {
@@ -247,7 +248,7 @@ Write-Host "  API:     http://localhost:4000/api/v1/health"
 Write-Host "  MinIO:   http://localhost:9001/ (minioadmin / minioadmin)"
 Write-Host ""
 Write-Host "Create your first admin account at: http://localhost:8080/app/register"
-if ($SeedDemoData) {
+if ($SeedSmokeData -or $SeedDemoData) {
   Write-Host "Smoke admin login: smoke-admin@extractiq.local / ExtractIQSmoke!2026"
   Write-Host "Invite token fixture: smoke-invite-token-2026"
 }

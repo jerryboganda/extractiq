@@ -32,9 +32,9 @@ Use this checklist before promoting a build.
 ## Production deployment
 
 1. Take a database backup.
-2. Deploy with [docker-compose.prod.yml](/Users/Admin/Desktop/MCQ Platform/docker-compose.prod.yml).
-3. If you are attaching to an existing reverse proxy network, also include [docker-compose.prod.proxy.yml](/Users/Admin/Desktop/MCQ Platform/docker-compose.prod.proxy.yml).
-4. Run migrations.
+2. Validate [`.env`](/Users/Admin/Desktop/MCQ Platform/.env) and [`Backend/.env`](/Users/Admin/Desktop/MCQ Platform/Backend/.env) contain the required production values, especially `APP_BASE_URL`, `S3_PUBLIC_ENDPOINT`, JWT/encryption secrets, and SMTP settings.
+3. Deploy with [`deploy/deploy.sh`](/Users/Admin/Desktop/MCQ Platform/deploy/deploy.sh). The script uses [docker-compose.prod.yml](/Users/Admin/Desktop/MCQ Platform/docker-compose.prod.yml) and automatically layers [docker-compose.prod.proxy.yml](/Users/Admin/Desktop/MCQ Platform/docker-compose.prod.proxy.yml) when the reverse-proxy network already exists.
+4. Confirm the runtime migration reconciler completed successfully.
 5. Check `/api/v1/health/ready`.
 6. Re-run the workflow verification list against production or staging.
 

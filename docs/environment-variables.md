@@ -28,6 +28,8 @@
 | `CORS_ORIGIN` | `http://localhost:8080` | Browser origin allowed to call the API |
 | `APP_BASE_URL` | `http://localhost:8080/app` | Operator app base URL used for invite links and deep links |
 
+In production, `CORS_ORIGIN` and `APP_BASE_URL` must use `https://`.
+
 ## Database and queues
 
 | Variable | Default | Description |
@@ -48,6 +50,8 @@
 | `S3_FORCE_PATH_STYLE` | `true` | Required for MinIO path-style addressing |
 
 `S3_PUBLIC_ENDPOINT` should point at a host that browser clients can actually reach. In local compose that is `http://localhost:9000`, while API and worker containers still use `http://minio:9000`.
+
+In production, `S3_PUBLIC_ENDPOINT` must not point at `localhost`, `127.0.0.1`, or the internal `minio` hostname.
 
 ## Authentication and passwords
 
@@ -80,6 +84,8 @@ Brevo is the default SMTP provider for all email-based flows in this project:
 | `SMTP_SECURE` | `false` |
 
 Set `SMTP_USER` to the Brevo SMTP login and `SMTP_PASS` to the Brevo SMTP key for the target environment. Local compose uses the same SMTP configuration as the rest of the stack; it no longer swaps in a separate sandbox mail server automatically.
+
+When `ENABLE_EMAIL_DELIVERY=true` in production, `SMTP_USER` and `SMTP_PASS` are required and validated at startup.
 
 ## AI provider keys
 
