@@ -22,6 +22,33 @@ require_command() {
   command -v "$1" >/dev/null 2>&1 || die "Required command not found: $1"
 }
 
+ensure_prerequisites() {
+  local missing=0
+
+  if ! command -v docker >/dev/null 2>&1; then
+    missing=1
+  fi
+
+  if ! command -v git >/dev/null 2>&1; then
+    missing=1
+  fi
+
+  if ! command -v curl >/dev/null 2>&1; then
+    missing=1
+  fi
+
+  if ! docker compose version >/dev/null 2>&1; then
+    missing=1
+  fi
+
+  if [ "$missing" -eq 0 ]; then
+    return 0
+  fi
+
+  apt-get update -qq
+  apt-get install -y -qq curl git docker.io docker-compose-plugin >/dev/null 2>&1
+}
+
 require_file() {
   local path="$1"
   [ -f "$path" ] || die "Required file is missing: $path"
@@ -68,8 +95,7 @@ wait_for_ready() {
 }
 
 log "Installing deployment prerequisites"
-apt-get update -qq
-apt-get install -y -qq curl git docker.io docker-compose-plugin >/dev/null 2>&1
+ensure_prerequisites
 
 require_command docker
 require_command git
