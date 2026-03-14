@@ -138,7 +138,7 @@ app_base_url="$(grep -E '^APP_BASE_URL=' "$BACKEND_ENV_FILE" | tail -n 1 | cut -
 cors_origin="$(grep -E '^CORS_ORIGIN=' "$BACKEND_ENV_FILE" | tail -n 1 | cut -d'=' -f2-)"
 
 log "Building and starting the production stack"
-docker compose "${COMPOSE_FILES[@]}" build api worker frontend
+docker compose "${COMPOSE_FILES[@]}" build migrate api worker frontend
 docker compose "${COMPOSE_FILES[@]}" up -d --remove-orphans
 
 log "Waiting for API liveness"
