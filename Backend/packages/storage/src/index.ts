@@ -34,6 +34,12 @@ function replaceEndpointHost(url: string, targetEndpoint: string): string {
     signed.protocol = target.protocol;
     signed.hostname = target.hostname;
     signed.port = target.port;
+    if (target.pathname && target.pathname !== '/') {
+      const basePath = target.pathname.endsWith('/')
+        ? target.pathname.slice(0, -1)
+        : target.pathname;
+      signed.pathname = `${basePath}${signed.pathname}`;
+    }
     return signed.toString();
   } catch {
     return url;
