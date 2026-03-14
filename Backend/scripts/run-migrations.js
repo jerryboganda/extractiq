@@ -48,6 +48,31 @@ async function getMigrationFiles() {
   return journal.entries.map((entry) => `${entry.tag}.sql`);
 }
 
+async function relationExists(name) {
+  const result = await db`SELECT to_regclass(${`public.${name}`}) as relation`;
+  return Boolean(result[0]?.relation);
+}
+
+async function canMarkMigrationAsApplied(file) {
+  if (file === '0000_magical_adam_destine.sql') {
+    const required = ['workspaces', 'users', 'projects', 'documents', 'jobs', 'mcq_records', 'provider_configs', 'notifications'];
+    for (const relation of required) {
+      if (!(await relationExists(relation))) return false;
+    }
+    return true;
+  }
+
+  if (file === '0001_workflow_hardening.sql') {
+    const required = ['invitation_tokens', 'public_submissions', 'email_deliveries'];
+    for (const relation of required) {
+      if (!(await relationExists(relation))) return false;
+    }
+    return true;
+  }
+
+  return false;
+}
+
 async function migrate() {
   await ensureMigrationsTable();
   
@@ -75,6 +100,13 @@ async function migrate() {
       if (!executed.has(file)) {
         console.log(`  ▶ ${file}`);
         const migrationSql = readFileSync(join(DRIZZLE_DIR, file), 'utf-8');
+
+        if (await canMarkMigrationAsApplied(file)) {
+          await db`INSERT INTO __runtime_migrations (name) VALUES (${file}) ON CONFLICT (name) DO NOTHING`;
+          console.log(`  ✓ ${file} reconciled against existing schema`);
+          ranCount++;
+          continue;
+        }
         
         try {
           await db.begin(async (tx) => {
