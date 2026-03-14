@@ -1,9 +1,11 @@
+import { isJobCancelled } from '../lib/job-guard.js';
 import type { Job } from 'bullmq';
 import type { TextSegmentationPayload, McqExtractionPayload } from '@mcq-platform/queue';
 import { enqueue, QUEUE_NAMES } from '@mcq-platform/queue';
 import { db, ocrArtifacts, segments, providerConfigs, documentPages } from '@mcq-platform/db';
 import { createLogger } from '@mcq-platform/logger';
 import { eq, and } from 'drizzle-orm';
+import { markProcessingFailure, shouldPersistFailure } from '../lib/failure-state.js';
 
 const logger = createLogger('worker:text-segmentation');
 
@@ -17,6 +19,11 @@ const logger = createLogger('worker:text-segmentation');
 export async function processTextSegmentation(job: Job<TextSegmentationPayload>) {
   const { jobId, documentPageId, workspaceId, ocrArtifactId } = job.data;
   logger.info({ jobId, documentPageId, ocrArtifactId }, 'Starting text segmentation');
+
+  try {
+
+    // C2: Skip if parent job was cancelled
+    if (await isJobCancelled(jobId)) return;
 
   // Fetch OCR artifact
   const [artifact] = await db
@@ -96,12 +103,20 @@ export async function processTextSegmentation(job: Job<TextSegmentationPayload>)
       providerConfigId: llmProvider.id,
       segmentIds: insertedSegments.map((s) => s.id),
     });
+  } else {
+    throw new Error(`No enabled LLM provider configured for workspace ${workspaceId}`);
   }
 
-  logger.info(
-    { jobId, documentPageId, segmentCount: insertedSegments.length },
-    'Text segmentation complete',
-  );
+    logger.info(
+      { jobId, documentPageId, segmentCount: insertedSegments.length },
+      'Text segmentation complete',
+    );
+  } catch (err) {
+    if (shouldPersistFailure(job)) {
+      await markProcessingFailure({ jobId, documentPageId, taskType: 'text_segmentation', error: err });
+    }
+    throw err;
+  }
 }
 
 // ──────────────────────────────────────────────

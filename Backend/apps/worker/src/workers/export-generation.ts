@@ -8,7 +8,8 @@ import {
 } from '@mcq-platform/db';
 import { upload, buildExportKey } from '@mcq-platform/storage';
 import { createLogger } from '@mcq-platform/logger';
-import { eq, and, inArray } from 'drizzle-orm';
+import { eq, and, inArray, gte, sql } from 'drizzle-orm';
+import { shouldPersistFailure } from '../lib/failure-state.js';
 
 const logger = createLogger('worker:export-generation');
 
@@ -27,11 +28,13 @@ export async function processExportGeneration(job: Job<ExportGenerationPayload>)
   const { exportJobId, workspaceId, projectId, format, scope } = job.data;
   logger.info({ exportJobId, format }, 'Starting export generation');
 
-  // Update export job status
-  await db.update(exportJobs).set({
-    status: 'processing',
-    progressPercent: 10,
-  }).where(eq(exportJobs.id, exportJobId));
+  try {
+
+    // Update export job status
+    await db.update(exportJobs).set({
+      status: 'processing',
+      progressPercent: 10,
+    }).where(eq(exportJobs.id, exportJobId));
 
   // Fetch MCQ records based on scope
   const conditions = [
@@ -45,6 +48,18 @@ export async function processExportGeneration(job: Job<ExportGenerationPayload>)
   }
   if (scope.reviewStatus && typeof scope.reviewStatus === 'string') {
     conditions.push(eq(mcqRecords.reviewStatus, scope.reviewStatus));
+  }
+  if (scope.dateFrom && typeof scope.dateFrom === 'string') {
+    conditions.push(gte(mcqRecords.createdAt, new Date(scope.dateFrom)));
+  }
+  if (scope.dateTo && typeof scope.dateTo === 'string') {
+    conditions.push(sql`${mcqRecords.createdAt} <= ${new Date(scope.dateTo)}`);
+  }
+  if (scope.minConfidence !== undefined && scope.minConfidence !== null) {
+    const threshold = Number(scope.minConfidence);
+    if (Number.isFinite(threshold)) {
+      conditions.push(gte(mcqRecords.confidence, threshold / 100));
+    }
   }
 
   const records = await db
@@ -72,6 +87,7 @@ export async function processExportGeneration(job: Job<ExportGenerationPayload>)
       fileExtension = 'csv';
       break;
     case 'qti':
+    case 'qti_2_1':
       content = generateQti(records);
       contentType = 'application/xml';
       fileExtension = 'xml';
@@ -124,10 +140,19 @@ export async function processExportGeneration(job: Job<ExportGenerationPayload>)
     completedAt: new Date(),
   }).where(eq(exportJobs.id, exportJobId));
 
-  logger.info(
-    { exportJobId, format, recordCount: records.length, fileSize: buffer.length },
-    'Export generation complete',
-  );
+    logger.info(
+      { exportJobId, format, recordCount: records.length, fileSize: buffer.length },
+      'Export generation complete',
+    );
+  } catch (err) {
+    if (shouldPersistFailure(job)) {
+      await db.update(exportJobs).set({
+        status: 'failed',
+        completedAt: new Date(),
+      }).where(eq(exportJobs.id, exportJobId));
+    }
+    throw err;
+  }
 }
 
 // ──────────────────────────────────────────────

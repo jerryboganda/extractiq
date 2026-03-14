@@ -40,9 +40,7 @@ export async function processNotification(job: Job<NotificationPayload>) {
         eq(users.status, 'active'),
       ));
 
-    targetUserIds = admins
-      .filter(() => true)  // All active users in workspace get notifications
-      .map((u) => u.id);
+    targetUserIds = admins.map((u) => u.id);
   }
 
   if (targetUserIds.length === 0 && !emails?.length) {

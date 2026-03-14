@@ -1,9 +1,11 @@
+import { isJobCancelled, updateJobStage } from '../lib/job-guard.js';
 import type { Job } from 'bullmq';
 import type { ValidationPayload, HallucinationDetectionPayload, ReviewRoutingPayload } from '@mcq-platform/queue';
 import { enqueue, QUEUE_NAMES } from '@mcq-platform/queue';
 import { db, mcqRecords } from '@mcq-platform/db';
 import { createLogger } from '@mcq-platform/logger';
 import { eq } from 'drizzle-orm';
+import { markProcessingFailure, shouldPersistFailure } from '../lib/failure-state.js';
 
 const logger = createLogger('worker:validation');
 
@@ -23,6 +25,13 @@ const logger = createLogger('worker:validation');
 export async function processValidation(job: Job<ValidationPayload>) {
   const { jobId, mcqRecordId, workspaceId } = job.data;
   logger.info({ jobId, mcqRecordId }, 'Starting validation');
+
+  try {
+
+    // C2: Skip if parent job was cancelled
+    if (await isJobCancelled(jobId)) return;
+    // H2: Update job to validation stage
+    await updateJobStage(jobId, 'validating');
 
   const [record] = await db
     .select()
@@ -112,10 +121,16 @@ export async function processValidation(job: Job<ValidationPayload>) {
     });
   }
 
-  logger.info(
-    { jobId, mcqRecordId, confidence: aggregatedConfidence, flags, hallucinationRiskTier },
-    'Validation complete',
-  );
+    logger.info(
+      { jobId, mcqRecordId, confidence: aggregatedConfidence, flags, hallucinationRiskTier },
+      'Validation complete',
+    );
+  } catch (err) {
+    if (shouldPersistFailure(job)) {
+      await markProcessingFailure({ jobId, mcqRecordId, taskType: 'validation', error: err });
+    }
+    throw err;
+  }
 }
 
 // ──────────────────────────────────────────────

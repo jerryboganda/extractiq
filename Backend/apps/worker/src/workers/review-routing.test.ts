@@ -17,6 +17,11 @@ vi.mock('@mcq-platform/logger', () => ({
   createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
 
+vi.mock('../lib/failure-state.js', () => ({
+  markProcessingFailure: vi.fn().mockResolvedValue(undefined),
+  shouldPersistFailure: vi.fn().mockReturnValue(true),
+}));
+
 import { processReviewRouting } from './review-routing.js';
 import { db } from '@mcq-platform/db';
 import { enqueue } from '@mcq-platform/queue';

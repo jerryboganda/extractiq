@@ -1,17 +1,18 @@
 import type { Request, Response, NextFunction } from 'express';
 import { eq, and, count, desc } from 'drizzle-orm';
-import { db, users, invitationTokens, workspaces } from '@mcq-platform/db';
+import { db, users, workspaces, invitationTokens } from '@mcq-platform/db';
 import { hashPassword, canManageRole } from '@mcq-platform/auth';
 import { env } from '@mcq-platform/config';
 import { enqueue, QUEUE_NAMES, type NotificationPayload } from '@mcq-platform/queue';
 import { AppError } from '../../middleware/error-handler.js';
+import { writeAuditLog } from '../../lib/audit.js';
+import { parsePagination } from '../../lib/pagination.js';
 import crypto from 'node:crypto';
 import { buildInvitationEmail } from '../../lib/email-templates.js';
 
 export async function list(req: Request, res: Response, next: NextFunction) {
   try {
-    const { page, limit } = req.query as unknown as { page: number; limit: number };
-    const offset = (page - 1) * limit;
+    const { page, limit, offset } = parsePagination(req.query as Record<string, unknown>);
 
     const items = await db
       .select({
@@ -134,6 +135,15 @@ export async function invite(req: Request, res: Response, next: NextFunction) {
       relatedId: user.id,
     });
 
+    writeAuditLog({
+      workspaceId: req.workspaceId,
+      userId: req.userId,
+      resourceType: 'user',
+      resourceId: user.id,
+      action: 'user.invited',
+      details: { email: user.email, role },
+    });
+
     res.status(201).json({
       data: {
         id: user.id,
@@ -182,6 +192,15 @@ export async function update(req: Request, res: Response, next: NextFunction) {
       .where(eq(users.id, id))
       .returning();
 
+    writeAuditLog({
+      workspaceId: req.workspaceId,
+      userId: req.userId,
+      resourceType: 'user',
+      resourceId: id,
+      action: 'user.updated',
+      details: updates,
+    });
+
     res.json({
       data: {
         id: updated.id,
@@ -210,6 +229,15 @@ export async function deactivate(req: Request, res: Response, next: NextFunction
       .returning();
 
     if (!user) throw new AppError(404, 'NOT_FOUND', 'User not found');
+
+    writeAuditLog({
+      workspaceId: req.workspaceId,
+      userId: req.userId,
+      resourceType: 'user',
+      resourceId: id,
+      action: 'user.deactivated',
+      details: { email: user.email },
+    });
 
     res.json({ data: { message: 'User deactivated' } });
   } catch (err) {

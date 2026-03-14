@@ -8,10 +8,10 @@ vi.mock('@mcq-platform/db', () => ({
     update: vi.fn(),
     delete: vi.fn(),
   },
-  jobs: { id: 'jobs.id', workspaceId: 'jobs.workspaceId' },
+  jobs: { id: 'jobs.id', workspaceId: 'jobs.workspaceId', status: 'jobs.status' },
   jobDocuments: { jobId: 'jobDocuments.jobId', documentId: 'jobDocuments.documentId' },
-  documents: { id: 'documents.id', workspaceId: 'documents.workspaceId' },
-  jobTasks: { id: 'jobTasks.id', jobId: 'jobTasks.jobId', createdAt: 'jobTasks.createdAt' },
+  documents: { id: 'documents.id', workspaceId: 'documents.workspaceId', s3Key: 'documents.s3Key' },
+  jobTasks: { id: 'jobTasks.id', jobId: 'jobTasks.jobId', createdAt: 'jobTasks.createdAt', status: 'jobTasks.status' },
   projects: { id: 'projects.id', workspaceId: 'projects.workspaceId' },
 }));
 
@@ -150,11 +150,14 @@ describe('jobs handlers', () => {
   });
 
   it('cancels a job with a deterministic error summary', async () => {
+    mockedDb.select
+      .mockReturnValueOnce(mockChain([{ status: 'queued' }]) as never)
+      .mockReturnValueOnce(mockChain([]) as never);
     mockedDb.update.mockReturnValueOnce(mockChain([{
       id: 'job-1',
       status: 'cancelled',
       errorSummary: { reason: 'Cancelled by user' },
-    }]) as never);
+    }]) as never).mockReturnValueOnce(mockChain([]) as never);
 
     const res = createRes();
     await cancel(createReq({ params: { id: 'job-1' } as any }), res, next);

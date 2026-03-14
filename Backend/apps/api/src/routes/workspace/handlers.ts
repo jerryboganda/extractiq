@@ -1,7 +1,8 @@
 import type { Request, Response, NextFunction } from 'express';
 import { eq, count } from 'drizzle-orm';
-import { db, workspaces, documents } from '@mcq-platform/db';
+import { db, workspaces, documents, auditLogs } from '@mcq-platform/db';
 import { AppError } from '../../middleware/error-handler.js';
+import { writeAuditLog } from '../../lib/audit.js';
 
 export async function get(req: Request, res: Response, next: NextFunction) {
   try {
@@ -50,6 +51,15 @@ export async function update(req: Request, res: Response, next: NextFunction) {
 
     if (!workspace) throw new AppError(404, 'NOT_FOUND', 'Workspace not found');
 
+    writeAuditLog({
+      workspaceId: req.workspaceId,
+      userId: req.userId,
+      resourceType: 'workspace',
+      resourceId: req.workspaceId,
+      action: 'workspace.updated',
+      details: updates,
+    });
+
     res.json({ data: workspace });
   } catch (err) {
     next(err);
@@ -71,6 +81,12 @@ export async function usage(req: Request, res: Response, next: NextFunction) {
       .from(documents)
       .where(eq(documents.workspaceId, req.workspaceId));
 
+    // Count API-level actions from audit logs as a proxy for API calls
+    const [apiCount] = await db
+      .select({ count: count() })
+      .from(auditLogs)
+      .where(eq(auditLogs.workspaceId, req.workspaceId));
+
     const planLimits: Record<string, { docs: number; api: number }> = {
       free: { docs: 50, api: 1000 },
       pro: { docs: 500, api: 10000 },
@@ -83,7 +99,7 @@ export async function usage(req: Request, res: Response, next: NextFunction) {
       data: {
         documentsUsed: docCount.count,
         documentsLimit: limits.docs,
-        apiCallsUsed: 0, // Would track via middleware counter
+        apiCallsUsed: apiCount.count,
         apiCallsLimit: limits.api,
       },
     });

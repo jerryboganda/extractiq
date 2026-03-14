@@ -5,6 +5,7 @@ vi.mock('@mcq-platform/db', () => ({
   db: { select: vi.fn(), update: vi.fn() },
   workspaces: 'workspaces_table',
   documents: 'documents_table',
+  auditLogs: 'audit_logs_table',
 }));
 
 vi.mock('@mcq-platform/logger', () => ({
@@ -110,7 +111,8 @@ describe('workspace handlers', () => {
 
       mockedDb.select
         .mockReturnValueOnce(selectWsChain as any)
-        .mockReturnValueOnce(countChain as any);
+        .mockReturnValueOnce(countChain as any)
+        .mockReturnValueOnce(mockChain([{ count: 1200 }]) as any);
 
       const req = createReq();
       const res = createRes();

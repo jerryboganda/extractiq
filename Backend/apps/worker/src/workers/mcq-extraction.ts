@@ -1,3 +1,4 @@
+import { isJobCancelled, updateJobStage } from '../lib/job-guard.js';
 import type { Job } from 'bullmq';
 import type { McqExtractionPayload, ValidationPayload } from '@mcq-platform/queue';
 import { enqueue, QUEUE_NAMES } from '@mcq-platform/queue';
@@ -8,12 +9,15 @@ import {
   vlmOutputs,
   providerConfigs,
   documentPages,
-  documents,
-  mcqRecords,
-  jobTasks,
-} from '@mcq-platform/db';
+    documents,
+    mcqRecords,
+    jobTasks,
+    costRecords,
+  } from '@mcq-platform/db';
 import { createLogger } from '@mcq-platform/logger';
 import { eq, inArray } from 'drizzle-orm';
+import { finalizeDocumentIfReady } from '../lib/document-lifecycle.js';
+import { markProcessingFailure, shouldPersistFailure } from '../lib/failure-state.js';
 
 const logger = createLogger('worker:mcq-extraction');
 
@@ -29,6 +33,13 @@ const logger = createLogger('worker:mcq-extraction');
 export async function processMcqExtraction(job: Job<McqExtractionPayload>) {
   const { jobId, documentPageId, workspaceId, providerConfigId, segmentIds, vlmOutputId } = job.data;
   logger.info({ jobId, documentPageId, providerConfigId }, 'Starting MCQ extraction');
+
+  try {
+
+    // C2: Skip if parent job was cancelled
+    if (await isJobCancelled(jobId)) return;
+    // H2: Update job to extraction stage
+    await updateJobStage(jobId, 'extracting');
 
   const startTime = Date.now();
 
@@ -88,6 +99,19 @@ export async function processMcqExtraction(job: Job<McqExtractionPayload>) {
 
   if (!inputText.trim()) {
     logger.warn({ jobId, documentPageId }, 'No input text for MCQ extraction');
+    await db.insert(jobTasks).values({
+      jobId,
+      documentPageId,
+      taskType: 'mcq_extraction',
+      status: 'completed',
+      providerConfigId,
+      outputData: { mcqRecordIds: [], count: 0 },
+      latencyMs: Date.now() - startTime,
+      costUsd: 0,
+      completedAt: new Date(),
+    });
+
+    await finalizeDocumentIfReady(page.documentId);
     return;
   }
 
@@ -160,6 +184,18 @@ export async function processMcqExtraction(job: Job<McqExtractionPayload>) {
     completedAt: new Date(),
   });
 
+  if (costUsd > 0) {
+    await db.insert(costRecords).values({
+      workspaceId,
+      jobId,
+      providerConfigId,
+      operationType: 'mcq_extraction',
+      costUsd,
+    });
+  }
+
+  await finalizeDocumentIfReady(page.documentId);
+
   // Enqueue validation for each MCQ
   for (const mcqId of insertedRecords) {
     await enqueue<ValidationPayload>(QUEUE_NAMES.VALIDATION, {
@@ -169,10 +205,16 @@ export async function processMcqExtraction(job: Job<McqExtractionPayload>) {
     });
   }
 
-  logger.info(
-    { jobId, documentPageId, mcqCount: insertedRecords.length, latencyMs, costUsd },
-    'MCQ extraction complete',
-  );
+    logger.info(
+      { jobId, documentPageId, mcqCount: insertedRecords.length, latencyMs, costUsd },
+      'MCQ extraction complete',
+    );
+  } catch (err) {
+    if (shouldPersistFailure(job)) {
+      await markProcessingFailure({ jobId, documentPageId, taskType: 'mcq_extraction', error: err });
+    }
+    throw err;
+  }
 }
 
 // ──────────────────────────────────────────────

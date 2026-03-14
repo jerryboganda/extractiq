@@ -1,12 +1,14 @@
+import { isJobCancelled, updateJobStage } from '../lib/job-guard.js';
 import type { Job } from 'bullmq';
 import type { VlmExtractionPayload, McqExtractionPayload } from '@mcq-platform/queue';
 import { enqueue, QUEUE_NAMES } from '@mcq-platform/queue';
-import { db, vlmOutputs, providerConfigs, jobTasks } from '@mcq-platform/db';
+import { db, vlmOutputs, providerConfigs, jobTasks, costRecords } from '@mcq-platform/db';
 import { decryptProviderSecret } from '@mcq-platform/auth';
 import { download } from '@mcq-platform/storage';
 import { createLogger } from '@mcq-platform/logger';
 import { env } from '@mcq-platform/config';
 import { eq } from 'drizzle-orm';
+import { markProcessingFailure, shouldPersistFailure } from '../lib/failure-state.js';
 
 const logger = createLogger('worker:vlm-extraction');
 
@@ -19,6 +21,13 @@ const logger = createLogger('worker:vlm-extraction');
 export async function processVlmExtraction(job: Job<VlmExtractionPayload>) {
   const { jobId, documentPageId, workspaceId, providerConfigId, pageImageS3Key } = job.data;
   logger.info({ jobId, documentPageId, providerConfigId }, 'Starting VLM extraction');
+
+  try {
+
+    // C2: Skip if parent job was cancelled
+    if (await isJobCancelled(jobId)) return;
+    // H2: Update job to VLM processing stage
+    await updateJobStage(jobId, 'ocr_processing');
 
   const startTime = Date.now();
 
@@ -100,6 +109,16 @@ export async function processVlmExtraction(job: Job<VlmExtractionPayload>) {
     completedAt: new Date(),
   });
 
+  if (costUsd > 0) {
+    await db.insert(costRecords).values({
+      workspaceId,
+      jobId,
+      providerConfigId,
+      operationType: 'vlm_extraction',
+      costUsd,
+    });
+  }
+
   // Enqueue MCQ extraction to structure the VLM results
   await enqueue<McqExtractionPayload>(QUEUE_NAMES.MCQ_EXTRACTION, {
     jobId,
@@ -109,10 +128,16 @@ export async function processVlmExtraction(job: Job<VlmExtractionPayload>) {
     vlmOutputId: output.id,
   });
 
-  logger.info(
-    { jobId, documentPageId, vlmOutputId: output.id, latencyMs, costUsd, mcqCount: extractedMcqs.length },
-    'VLM extraction complete',
-  );
+    logger.info(
+      { jobId, documentPageId, vlmOutputId: output.id, latencyMs, costUsd, mcqCount: extractedMcqs.length },
+      'VLM extraction complete',
+    );
+  } catch (err) {
+    if (shouldPersistFailure(job)) {
+      await markProcessingFailure({ jobId, documentPageId, taskType: 'vlm_extraction', error: err });
+    }
+    throw err;
+  }
 }
 
 // ──────────────────────────────────────────────

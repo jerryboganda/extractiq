@@ -1,3 +1,4 @@
+import { isJobCancelled, updateJobStage } from '../lib/job-guard.js';
 import type { Job } from 'bullmq';
 import type { OcrExtractionPayload, TextSegmentationPayload } from '@mcq-platform/queue';
 import { enqueue, QUEUE_NAMES } from '@mcq-platform/queue';
@@ -6,6 +7,7 @@ import { decryptProviderSecret } from '@mcq-platform/auth';
 import { createLogger } from '@mcq-platform/logger';
 import { env } from '@mcq-platform/config';
 import { eq } from 'drizzle-orm';
+import { markProcessingFailure, shouldPersistFailure } from '../lib/failure-state.js';
 
 const logger = createLogger('worker:ocr-extraction');
 
@@ -20,7 +22,14 @@ export async function processOcrExtraction(job: Job<OcrExtractionPayload>) {
   const { jobId, documentPageId, workspaceId, providerConfigId } = job.data;
   logger.info({ jobId, documentPageId, providerConfigId }, 'Starting OCR extraction');
 
-  const startTime = Date.now();
+  try {
+
+    // C2: Skip if parent job was cancelled
+    if (await isJobCancelled(jobId)) return;
+    // H2: Update job to OCR processing stage
+    await updateJobStage(jobId, 'ocr_processing');
+
+    const startTime = Date.now();
 
   // Fetch provider config
   const [provider] = await db
@@ -108,10 +117,16 @@ export async function processOcrExtraction(job: Job<OcrExtractionPayload>) {
     ocrArtifactId: artifact.id,
   });
 
-  logger.info(
-    { jobId, documentPageId, ocrArtifactId: artifact.id, latencyMs, confidence },
-    'OCR extraction complete',
-  );
+    logger.info(
+      { jobId, documentPageId, ocrArtifactId: artifact.id, latencyMs, confidence },
+      'OCR extraction complete',
+    );
+  } catch (err) {
+    if (shouldPersistFailure(job)) {
+      await markProcessingFailure({ jobId, documentPageId, taskType: 'ocr_extraction', error: err });
+    }
+    throw err;
+  }
 }
 
 // ──────────────────────────────────────────────

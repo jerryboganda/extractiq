@@ -18,7 +18,10 @@ import { processNotification } from './workers/notification.js';
 
 const logger = createLogger('worker');
 
+const SHUTDOWN_TIMEOUT_MS = parseInt(process.env.WORKER_SHUTDOWN_TIMEOUT_MS ?? '30000', 10);
+
 const workers: Worker[] = [];
+let isShuttingDown = false;
 
 function startWorkers() {
   logger.info('Starting all workers...');
@@ -42,15 +45,41 @@ function startWorkers() {
 }
 
 async function shutdown(signal: string) {
-  logger.info({ signal }, 'Shutdown signal received');
-
-  // Close all workers gracefully
-  await Promise.all(workers.map((w) => w.close()));
-  await closeAllQueues();
-  await closeDb();
-
-  logger.info('All workers stopped, exiting');
-  process.exit(0);
+  if (isShuttingDown) {
+    logger.warn('Shutdown already in progress, ignoring signal');
+    return;
+  }
+  
+  isShuttingDown = true;
+  logger.info({ signal, timeoutMs: SHUTDOWN_TIMEOUT_MS }, 'Shutdown signal received');
+  
+  try {
+    logger.info('Closing workers and waiting for active jobs to finish...');
+    await Promise.race([
+      Promise.all(workers.map(async (worker, index) => {
+        try {
+          await worker.close();
+        } catch (err) {
+          logger.error({ workerIndex: index, err }, 'Error closing worker');
+        }
+      })),
+      new Promise((_, reject) => {
+        setTimeout(() => reject(new Error(`Worker shutdown timed out after ${SHUTDOWN_TIMEOUT_MS}ms`)), SHUTDOWN_TIMEOUT_MS);
+      }),
+    ]);
+    
+    logger.info('Closing queues...');
+    await closeAllQueues();
+    
+    logger.info('Closing database connection...');
+    await closeDb();
+    
+    logger.info('Shutdown complete, exiting');
+    process.exit(0);
+  } catch (err) {
+    logger.error({ err }, 'Error during shutdown');
+    process.exit(1);
+  }
 }
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));

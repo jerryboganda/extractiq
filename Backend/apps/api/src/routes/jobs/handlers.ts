@@ -1,13 +1,22 @@
 import type { Request, Response, NextFunction } from 'express';
-import { eq, and, count, desc } from 'drizzle-orm';
+import { eq, and, count, desc, inArray } from 'drizzle-orm';
 import { db, jobs, jobDocuments, documents, jobTasks, projects } from '@mcq-platform/db';
 import { enqueue, QUEUE_NAMES, type DocumentPreprocessingPayload } from '@mcq-platform/queue';
 import { AppError } from '../../middleware/error-handler.js';
+import { writeAuditLog } from '../../lib/audit.js';
+import { parsePagination } from '../../lib/pagination.js';
 
 export async function list(req: Request, res: Response, next: NextFunction) {
   try {
-    const { page, limit } = req.query as unknown as { page: number; limit: number };
-    const offset = (page - 1) * limit;
+    const { page, limit, offset } = parsePagination(req.query as Record<string, unknown>);
+    const { status } = req.query as { status?: string };
+
+    const filters = [eq(jobs.workspaceId, req.workspaceId)];
+    if (status === 'processing') {
+      filters.push(inArray(jobs.status, ['pending', 'queued', 'preprocessing', 'ocr_processing', 'extracting', 'validating', 'processing']));
+    } else if (status) {
+      filters.push(eq(jobs.status, status));
+    }
 
     const items = await db
       .select({
@@ -23,7 +32,7 @@ export async function list(req: Request, res: Response, next: NextFunction) {
         failedTasks: jobs.failedTasks,
       })
       .from(jobs)
-      .where(eq(jobs.workspaceId, req.workspaceId))
+      .where(and(...filters))
       .orderBy(desc(jobs.createdAt))
       .limit(limit)
       .offset(offset);
@@ -31,15 +40,13 @@ export async function list(req: Request, res: Response, next: NextFunction) {
     const [{ total }] = await db
       .select({ total: count() })
       .from(jobs)
-      .where(eq(jobs.workspaceId, req.workspaceId));
+      .where(and(...filters));
 
     res.json({
       data: {
         items: await Promise.all(items.map(async (item) => {
           const [jobDoc] = await db
-            .select({
-              filename: documents.filename,
-            })
+            .select({ filename: documents.filename })
             .from(jobDocuments)
             .innerJoin(documents, eq(documents.id, jobDocuments.documentId))
             .where(eq(jobDocuments.jobId, item.id))
@@ -159,7 +166,16 @@ export async function create(req: Request, res: Response, next: NextFunction) {
       }
     }
 
-    res.status(201).json({ data: { ...job, status: 'queued' } });
+    writeAuditLog({
+      workspaceId: req.workspaceId,
+      userId: req.userId,
+      resourceType: 'job',
+      resourceId: job.id,
+      action: 'job.created',
+      details: { documentCount: documentIds.length, projectId },
+    });
+
+    res.status(201).json({ data: job });
   } catch (err) {
     next(err);
   }
@@ -191,16 +207,46 @@ export async function getById(req: Request, res: Response, next: NextFunction) {
 export async function cancel(req: Request, res: Response, next: NextFunction) {
   try {
     const id = req.params.id as string;
+
+    // Only cancel jobs in non-terminal states
+    const cancellableStatuses = ['pending', 'queued', 'preprocessing', 'ocr_processing', 'extracting', 'validating', 'processing'];
+    const [existing] = await db
+      .select({ status: jobs.status })
+      .from(jobs)
+      .where(and(eq(jobs.id, id), eq(jobs.workspaceId, req.workspaceId)))
+      .limit(1);
+
+    if (!existing) throw new AppError(404, 'NOT_FOUND', 'Job not found');
+    if (!cancellableStatuses.includes(existing.status)) {
+      throw new AppError(400, 'INVALID_STATE', `Cannot cancel job in '${existing.status}' state`);
+    }
+
     const [job] = await db
       .update(jobs)
       .set({ status: 'cancelled', completedAt: new Date(), errorSummary: { reason: 'Cancelled by user' } })
-      .where(and(
-        eq(jobs.id, id),
-        eq(jobs.workspaceId, req.workspaceId),
-      ))
+      .where(eq(jobs.id, id))
       .returning();
 
-    if (!job) throw new AppError(404, 'NOT_FOUND', 'Job not found');
+    // Cancel pending job tasks
+    await db.update(jobTasks)
+      .set({ status: 'cancelled' })
+      .where(and(eq(jobTasks.jobId, id), eq(jobTasks.status, 'pending')));
+
+    // Reset document statuses back to 'uploaded' for documents in this job
+    const jobDocs = await db.select({ documentId: jobDocuments.documentId }).from(jobDocuments).where(eq(jobDocuments.jobId, id));
+    if (jobDocs.length > 0) {
+      await db.update(documents)
+        .set({ status: 'uploaded' })
+        .where(inArray(documents.id, jobDocs.map((d) => d.documentId)));
+    }
+
+    writeAuditLog({
+      workspaceId: req.workspaceId,
+      userId: req.userId,
+      resourceType: 'job',
+      resourceId: id,
+      action: 'job.cancelled',
+    });
 
     res.json({ data: job });
   } catch (err) {
@@ -264,6 +310,14 @@ export async function retry(req: Request, res: Response, next: NextFunction) {
         s3Key: doc.s3Key,
       });
     }
+
+    writeAuditLog({
+      workspaceId: req.workspaceId,
+      userId: req.userId,
+      resourceType: 'job',
+      resourceId: id,
+      action: 'job.retried',
+    });
 
     res.json({ data: job });
   } catch (err) {

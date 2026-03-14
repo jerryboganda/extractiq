@@ -2,6 +2,26 @@ import type { Request, Response, NextFunction } from 'express';
 import { eq, and, count, sql, gte, desc } from 'drizzle-orm';
 import { db, documents, mcqRecords, jobs, providerConfigs, providerBenchmarks, auditLogs, jobDocuments, jobTasks } from '@mcq-platform/db';
 
+function calculateTrend(current: number, previous: number): number {
+  if (previous === 0) {
+    return current > 0 ? 100 : 0;
+  }
+  return Math.round(((current - previous) / previous) * 100);
+}
+
+function getDateRange(periodDays: number): { currentStart: Date; previousStart: Date; previousEnd: Date } {
+  const now = new Date();
+  const currentStart = new Date(now);
+  currentStart.setDate(currentStart.getDate() - periodDays);
+  
+  const previousStart = new Date(currentStart);
+  previousStart.setDate(previousStart.getDate() - periodDays);
+  
+  const previousEnd = new Date(currentStart);
+  
+  return { currentStart, previousStart, previousEnd };
+}
+
 export async function getStats(req: Request, res: Response, next: NextFunction) {
   try {
     const wid = req.workspaceId;
@@ -33,17 +53,104 @@ export async function getStats(req: Request, res: Response, next: NextFunction) 
       ? Math.round((approvedCount.count / mcqCount.count) * 100)
       : 0;
 
+    const { currentStart: docsCurrentStart, previousStart: docsPrevStart, previousEnd: docsPrevEnd } = getDateRange(7);
+    const { currentStart: mcqsCurrentStart, previousStart: mcqsPrevStart, previousEnd: mcqsPrevEnd } = getDateRange(7);
+    const { currentStart: jobsCurrentStart, previousStart: jobsPrevStart, previousEnd: jobsPrevEnd } = getDateRange(7);
+
+    const [currentDocs] = await db
+      .select({ count: count() })
+      .from(documents)
+      .where(and(
+        eq(documents.workspaceId, wid),
+        gte(documents.createdAt, docsCurrentStart),
+      ));
+
+    const [previousDocs] = await db
+      .select({ count: count() })
+      .from(documents)
+      .where(and(
+        eq(documents.workspaceId, wid),
+        gte(documents.createdAt, docsPrevStart),
+        sql`${documents.createdAt} < ${docsPrevEnd}`,
+      ));
+
+    const [currentMcqs] = await db
+      .select({ count: count() })
+      .from(mcqRecords)
+      .where(and(
+        eq(mcqRecords.workspaceId, wid),
+        gte(mcqRecords.createdAt, mcqsCurrentStart),
+      ));
+
+    const [previousMcqs] = await db
+      .select({ count: count() })
+      .from(mcqRecords)
+      .where(and(
+        eq(mcqRecords.workspaceId, wid),
+        gte(mcqRecords.createdAt, mcqsPrevStart),
+        sql`${mcqRecords.createdAt} < ${mcqsPrevEnd}`,
+      ));
+
+    const [currentApproved] = await db
+      .select({ count: count() })
+      .from(mcqRecords)
+      .where(and(
+        eq(mcqRecords.workspaceId, wid),
+        eq(mcqRecords.reviewStatus, 'approved'),
+        gte(mcqRecords.updatedAt, mcqsCurrentStart),
+      ));
+
+    const [previousApproved] = await db
+      .select({ count: count() })
+      .from(mcqRecords)
+      .where(and(
+        eq(mcqRecords.workspaceId, wid),
+        eq(mcqRecords.reviewStatus, 'approved'),
+        gte(mcqRecords.updatedAt, mcqsPrevStart),
+        sql`${mcqRecords.updatedAt} < ${mcqsPrevEnd}`,
+      ));
+
+    const currentApprovalRate = currentMcqs.count > 0
+      ? Math.round((currentApproved.count / currentMcqs.count) * 100)
+      : 0;
+    const previousApprovalRate = previousMcqs.count > 0
+      ? Math.round((previousApproved.count / previousMcqs.count) * 100)
+      : 0;
+
+    const [currentActiveJobs] = await db
+      .select({ count: count() })
+      .from(jobs)
+      .where(and(
+        eq(jobs.workspaceId, wid),
+        sql`${jobs.status} IN ('queued', 'preprocessing', 'ocr_processing', 'vlm_processing', 'extracting', 'validating', 'review_required')`,
+        gte(jobs.createdAt, jobsCurrentStart),
+      ));
+
+    const [previousActiveJobs] = await db
+      .select({ count: count() })
+      .from(jobs)
+      .where(and(
+        eq(jobs.workspaceId, wid),
+        sql`${jobs.status} IN ('queued', 'preprocessing', 'ocr_processing', 'vlm_processing', 'extracting', 'validating', 'review_required')`,
+        gte(jobs.createdAt, jobsPrevStart),
+        sql`${jobs.createdAt} < ${jobsPrevEnd}`,
+      ));
+
+    const documentsProcessedTrend = calculateTrend(currentDocs.count, previousDocs.count);
+    const mcqsExtractedTrend = calculateTrend(currentMcqs.count, previousMcqs.count);
+    const approvalRateTrend = currentApprovalRate - previousApprovalRate;
+    const activeJobsTrend = calculateTrend(currentActiveJobs.count, previousActiveJobs.count);
+
     res.json({
       data: {
         documentsProcessed: docCount.count,
         mcqsExtracted: mcqCount.count,
         approvalRate,
         activeJobs: activeJobCount.count,
-        // Trends would be computed from time-series comparison — returning 0 for now
-        documentsProcessedTrend: 0,
-        mcqsExtractedTrend: 0,
-        approvalRateTrend: 0,
-        activeJobsTrend: 0,
+        documentsProcessedTrend,
+        mcqsExtractedTrend,
+        approvalRateTrend,
+        activeJobsTrend,
       },
     });
   } catch (err) {
@@ -53,7 +160,6 @@ export async function getStats(req: Request, res: Response, next: NextFunction) 
 
 export async function getSparklines(req: Request, res: Response, next: NextFunction) {
   try {
-    // Generate 7-day sparkline data
     const wid = req.workspaceId;
     const days = 7;
     const sparklines = {
@@ -88,10 +194,32 @@ export async function getSparklines(req: Request, res: Response, next: NextFunct
           sql`${mcqRecords.createdAt} < ${dayEnd}`,
         ));
 
+      const [approved] = await db
+        .select({ count: count() })
+        .from(mcqRecords)
+        .where(and(
+          eq(mcqRecords.workspaceId, wid),
+          eq(mcqRecords.reviewStatus, 'approved'),
+          gte(mcqRecords.updatedAt, dayStart),
+          sql`${mcqRecords.updatedAt} < ${dayEnd}`,
+        ));
+
+      const [activeJobs] = await db
+        .select({ count: count() })
+        .from(jobs)
+        .where(and(
+          eq(jobs.workspaceId, wid),
+          sql`${jobs.status} IN ('queued', 'preprocessing', 'ocr_processing', 'vlm_processing', 'extracting', 'validating', 'review_required')`,
+          gte(jobs.createdAt, dayStart),
+          sql`${jobs.createdAt} < ${dayEnd}`,
+        ));
+
       sparklines.documentsProcessed.push(docs.count);
       sparklines.mcqsExtracted.push(mcqs.count);
-      sparklines.approvalRate.push(0); // Simplified
-      sparklines.activeJobs.push(0);
+      sparklines.approvalRate.push(
+        mcqs.count > 0 ? Math.round((approved.count / mcqs.count) * 100) : 0
+      );
+      sparklines.activeJobs.push(activeJobs.count);
     }
 
     res.json({ data: sparklines });

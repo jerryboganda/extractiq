@@ -1,12 +1,19 @@
 import type { Request, Response, NextFunction } from 'express';
-import { eq, and, count, desc } from 'drizzle-orm';
+import { eq, and, count, desc, ilike } from 'drizzle-orm';
 import { db, projects, documents, mcqRecords } from '@mcq-platform/db';
 import { AppError } from '../../middleware/error-handler.js';
+import { writeAuditLog } from '../../lib/audit.js';
+import { parsePagination } from '../../lib/pagination.js';
 
 export async function list(req: Request, res: Response, next: NextFunction) {
   try {
-    const { page, limit } = req.query as unknown as { page: number; limit: number };
-    const offset = (page - 1) * limit;
+    const { page, limit, offset } = parsePagination(req.query as Record<string, unknown>);
+    const { search } = req.query as { search?: string };
+
+    const filters = [eq(projects.workspaceId, req.workspaceId)];
+    if (search) {
+      filters.push(ilike(projects.name, `%${search}%`));
+    }
 
     const items = await db
       .select({
@@ -17,7 +24,7 @@ export async function list(req: Request, res: Response, next: NextFunction) {
         createdAt: projects.createdAt,
       })
       .from(projects)
-      .where(eq(projects.workspaceId, req.workspaceId))
+      .where(and(...filters))
       .orderBy(desc(projects.createdAt))
       .limit(limit)
       .offset(offset);
@@ -25,7 +32,7 @@ export async function list(req: Request, res: Response, next: NextFunction) {
     const [{ total }] = await db
       .select({ total: count() })
       .from(projects)
-      .where(eq(projects.workspaceId, req.workspaceId));
+      .where(and(...filters));
 
     // Enrich with doc + mcq counts
     const enriched = await Promise.all(
@@ -62,6 +69,15 @@ export async function create(req: Request, res: Response, next: NextFunction) {
       .returning();
 
     res.status(201).json({ data: project });
+
+    writeAuditLog({
+      workspaceId: req.workspaceId,
+      userId: req.userId,
+      resourceType: 'project',
+      resourceId: project.id,
+      action: 'project.created',
+      details: { name: project.name },
+    });
   } catch (err) {
     next(err);
   }
@@ -98,6 +114,14 @@ export async function update(req: Request, res: Response, next: NextFunction) {
 
     if (!project) throw new AppError(404, 'NOT_FOUND', 'Project not found');
 
+    writeAuditLog({
+      workspaceId: req.workspaceId,
+      userId: req.userId,
+      resourceType: 'project',
+      resourceId: project.id,
+      action: 'project.updated',
+    });
+
     res.json({ data: project });
   } catch (err) {
     next(err);
@@ -113,6 +137,15 @@ export async function remove(req: Request, res: Response, next: NextFunction) {
       .returning();
 
     if (!project) throw new AppError(404, 'NOT_FOUND', 'Project not found');
+
+    writeAuditLog({
+      workspaceId: req.workspaceId,
+      userId: req.userId,
+      resourceType: 'project',
+      resourceId: project.id,
+      action: 'project.deleted',
+      details: { name: project.name },
+    });
 
     res.json({ data: { message: 'Project deleted' } });
   } catch (err) {

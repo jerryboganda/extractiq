@@ -5,6 +5,14 @@ import { db, mcqRecords, costRecords, jobs, providerConfigs, providerBenchmarks 
 function getDateRange(query: any): { start: Date; end: Date } {
   const end = new Date();
   const start = new Date();
+
+  if (query.days) {
+    const days = Number(query.days);
+    if (Number.isFinite(days) && days > 0) {
+      start.setDate(end.getDate() - days);
+      return { start, end };
+    }
+  }
   
   switch (query.range) {
     case '7d': start.setDate(end.getDate() - 7); break;
@@ -59,7 +67,7 @@ export async function timeSeries(req: Request, res: Response, next: NextFunction
       date: d.date,
       mcqCount: Number(d.mcqCount),
       cost: costMap.get(d.date) ?? 0,
-      confidence: Math.round(Number(d.confidence ?? 0)),
+      confidence: Math.round(Number(d.confidence ?? 0) * 100),
     }));
 
     res.json({ data: series });
@@ -72,11 +80,11 @@ export async function confidenceDistribution(req: Request, res: Response, next: 
   try {
     const wid = req.workspaceId;
     const ranges = [
-      { label: '0-20', min: 0, max: 20 },
-      { label: '21-40', min: 21, max: 40 },
-      { label: '41-60', min: 41, max: 60 },
-      { label: '61-80', min: 61, max: 80 },
-      { label: '81-100', min: 81, max: 100 },
+      { label: '0-20', min: 0, max: 0.2 },
+      { label: '21-40', min: 0.2, max: 0.4 },
+      { label: '41-60', min: 0.4, max: 0.6 },
+      { label: '61-80', min: 0.6, max: 0.8 },
+      { label: '81-100', min: 0.8, max: 1.0 },
     ];
 
     const colors = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#06b6d4'];
@@ -123,7 +131,7 @@ export async function providerComparison(req: Request, res: Response, next: Next
 
         return {
           provider: p.displayName,
-          accuracy: benchmark?.accuracy ?? 0,
+          accuracy: Math.round(Number(benchmark?.accuracy ?? 0) * 100),
           speed: benchmark?.avgLatencyMs ? Math.round(100 - (benchmark.avgLatencyMs / 100)) : 0,
           costEfficiency: benchmark?.costPerRecord ? Math.round(100 - (benchmark.costPerRecord * 100)) : 0,
         };
@@ -210,16 +218,78 @@ export async function costBreakdown(req: Request, res: Response, next: NextFunct
 export async function summary(req: Request, res: Response, next: NextFunction) {
   try {
     const wid = req.workspaceId;
+    const { start, end } = getDateRange(req.query);
+    const previousStart = new Date(start);
+    previousStart.setDate(previousStart.getDate() - Math.max(1, Math.round((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000))));
+
+    const formatChange = (current: number, previous: number) => {
+      if (previous === 0) return current > 0 ? '+100%' : '0%';
+      const delta = Math.round(((current - previous) / previous) * 100);
+      return `${delta >= 0 ? '+' : ''}${delta}%`;
+    };
 
     const [totalMcqs] = await db.select({ count: count() }).from(mcqRecords).where(eq(mcqRecords.workspaceId, wid));
     const [avgConf] = await db.select({ avg: avg(mcqRecords.confidence) }).from(mcqRecords).where(eq(mcqRecords.workspaceId, wid));
     const [totalCost] = await db.select({ sum: sum(costRecords.costUsd) }).from(costRecords).where(eq(costRecords.workspaceId, wid));
+    const [rejected] = await db.select({ count: count() }).from(mcqRecords).where(and(eq(mcqRecords.workspaceId, wid), eq(mcqRecords.reviewStatus, 'rejected')));
+
+    const [currentExtractions] = await db
+      .select({ count: count() })
+      .from(mcqRecords)
+      .where(and(eq(mcqRecords.workspaceId, wid), gte(mcqRecords.createdAt, start), sql`${mcqRecords.createdAt} <= ${end}`));
+    const [previousExtractions] = await db
+      .select({ count: count() })
+      .from(mcqRecords)
+      .where(and(eq(mcqRecords.workspaceId, wid), gte(mcqRecords.createdAt, previousStart), sql`${mcqRecords.createdAt} < ${start}`));
+
+    const [currentAvgConf] = await db
+      .select({ avg: avg(mcqRecords.confidence) })
+      .from(mcqRecords)
+      .where(and(eq(mcqRecords.workspaceId, wid), gte(mcqRecords.createdAt, start), sql`${mcqRecords.createdAt} <= ${end}`));
+    const [previousAvgConf] = await db
+      .select({ avg: avg(mcqRecords.confidence) })
+      .from(mcqRecords)
+      .where(and(eq(mcqRecords.workspaceId, wid), gte(mcqRecords.createdAt, previousStart), sql`${mcqRecords.createdAt} < ${start}`));
+
+    const [currentCost] = await db
+      .select({ sum: sum(costRecords.costUsd) })
+      .from(costRecords)
+      .where(and(eq(costRecords.workspaceId, wid), gte(costRecords.createdAt, start), sql`${costRecords.createdAt} <= ${end}`));
+    const [previousCost] = await db
+      .select({ sum: sum(costRecords.costUsd) })
+      .from(costRecords)
+      .where(and(eq(costRecords.workspaceId, wid), gte(costRecords.createdAt, previousStart), sql`${costRecords.createdAt} < ${start}`));
+
+    const [currentRejected] = await db
+      .select({ count: count() })
+      .from(mcqRecords)
+      .where(and(eq(mcqRecords.workspaceId, wid), eq(mcqRecords.reviewStatus, 'rejected'), gte(mcqRecords.updatedAt, start), sql`${mcqRecords.updatedAt} <= ${end}`));
+    const [previousRejected] = await db
+      .select({ count: count() })
+      .from(mcqRecords)
+      .where(and(eq(mcqRecords.workspaceId, wid), eq(mcqRecords.reviewStatus, 'rejected'), gte(mcqRecords.updatedAt, previousStart), sql`${mcqRecords.updatedAt} < ${start}`));
+
+    const totalMcqCount = Number(totalMcqs.count ?? 0);
+    const rejectionRate = totalMcqCount > 0 ? Math.round((Number(rejected.count ?? 0) / totalMcqCount) * 100) : 0;
+    const currentConfidencePct = Math.round(Number(currentAvgConf.avg ?? 0) * 100);
+    const previousConfidencePct = Math.round(Number(previousAvgConf.avg ?? 0) * 100);
+    const currentRejectionRate = Number(currentExtractions.count ?? 0) > 0
+      ? Math.round((Number(currentRejected.count ?? 0) / Number(currentExtractions.count ?? 1)) * 100)
+      : 0;
+    const previousRejectionRate = Number(previousExtractions.count ?? 0) > 0
+      ? Math.round((Number(previousRejected.count ?? 0) / Number(previousExtractions.count ?? 1)) * 100)
+      : 0;
 
     res.json({
       data: {
-        totalMcqRecords: totalMcqs.count,
-        averageConfidence: Math.round(Number(avgConf.avg ?? 0)),
+        totalMcqRecords: totalMcqCount,
+        averageConfidence: Math.round(Number(avgConf.avg ?? 0) * 100),
         totalCostUsd: Number(totalCost.sum ?? 0),
+        rejectionRate,
+        extractionsChange: formatChange(Number(currentExtractions.count ?? 0), Number(previousExtractions.count ?? 0)),
+        confidenceChange: formatChange(currentConfidencePct, previousConfidencePct),
+        costChange: formatChange(Number(currentCost.sum ?? 0), Number(previousCost.sum ?? 0)),
+        rejectionChange: formatChange(currentRejectionRate, previousRejectionRate),
       },
     });
   } catch (err) {

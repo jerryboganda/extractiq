@@ -313,7 +313,7 @@ describe('createExportSchema', () => {
   });
 
   it('accepts all valid formats', () => {
-    const formats = ['json', 'jsonl', 'csv', 'qti_2_1', 'scorm_2004', 'xapi'];
+    const formats = ['json', 'csv', 'qti_2_1', 'gift', 'aiken'];
     for (const format of formats) {
       expect(
         createExportSchema.safeParse({ format, projectId: '550e8400-e29b-41d4-a716-446655440000' }).success

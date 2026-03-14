@@ -48,7 +48,7 @@ describe('analytics handlers', () => {
 
   describe('timeSeries', () => {
     it('returns MCQ and cost data grouped by date', async () => {
-      const mcqData = [{ date: '2024-01-01', mcqCount: 10, confidence: '85' }];
+      const mcqData = [{ date: '2024-01-01', mcqCount: 10, confidence: '0.85' }];
       const costData = [{ date: '2024-01-01', cost: '2.50' }];
 
       mockedDb.select
@@ -92,7 +92,7 @@ describe('analytics handlers', () => {
   describe('providerComparison', () => {
     it('returns comparison with benchmark data', async () => {
       const providers = [{ id: 'p1', displayName: 'OpenAI' }];
-      const benchmark = { accuracy: 95, avgLatencyMs: 200, costPerRecord: 0.05 };
+      const benchmark = { accuracy: 0.95, avgLatencyMs: 200, costPerRecord: 0.05 };
 
       mockedDb.select
         .mockReturnValueOnce(mockChain(providers) as any)     // providers list
@@ -166,8 +166,17 @@ describe('analytics handlers', () => {
     it('returns aggregate totals', async () => {
       mockedDb.select
         .mockReturnValueOnce(mockChain([{ count: 1000 }]) as any)     // totalMcqs
-        .mockReturnValueOnce(mockChain([{ avg: '87.5' }]) as any)     // avgConf
-        .mockReturnValueOnce(mockChain([{ sum: '250.00' }]) as any);  // totalCost
+        .mockReturnValueOnce(mockChain([{ avg: '0.875' }]) as any)    // avgConf
+        .mockReturnValueOnce(mockChain([{ sum: '250.00' }]) as any)   // totalCost
+        .mockReturnValueOnce(mockChain([{ count: 100 }]) as any)      // rejected
+        .mockReturnValueOnce(mockChain([{ count: 100 }]) as any)      // currentExtractions
+        .mockReturnValueOnce(mockChain([{ count: 100 }]) as any)      // previousExtractions
+        .mockReturnValueOnce(mockChain([{ avg: '0.875' }]) as any)    // currentAvgConf
+        .mockReturnValueOnce(mockChain([{ avg: '0.875' }]) as any)    // previousAvgConf
+        .mockReturnValueOnce(mockChain([{ sum: '25.00' }]) as any)    // currentCost
+        .mockReturnValueOnce(mockChain([{ sum: '25.00' }]) as any)    // previousCost
+        .mockReturnValueOnce(mockChain([{ count: 10 }]) as any)       // currentRejected
+        .mockReturnValueOnce(mockChain([{ count: 10 }]) as any);      // previousRejected
 
       const req = createReq();
       const res = createRes();
@@ -177,13 +186,24 @@ describe('analytics handlers', () => {
       expect(data.totalMcqRecords).toBe(1000);
       expect(data.averageConfidence).toBe(88); // rounded
       expect(data.totalCostUsd).toBe(250);
+      expect(data.rejectionRate).toBe(10);
+      expect(data.extractionsChange).toBe('+0%');
     });
 
     it('handles null aggregations gracefully', async () => {
       mockedDb.select
         .mockReturnValueOnce(mockChain([{ count: 0 }]) as any)
         .mockReturnValueOnce(mockChain([{ avg: null }]) as any)
-        .mockReturnValueOnce(mockChain([{ sum: null }]) as any);
+        .mockReturnValueOnce(mockChain([{ sum: null }]) as any)
+        .mockReturnValueOnce(mockChain([{ count: 0 }]) as any)
+        .mockReturnValueOnce(mockChain([{ count: 0 }]) as any)
+        .mockReturnValueOnce(mockChain([{ count: 0 }]) as any)
+        .mockReturnValueOnce(mockChain([{ avg: null }]) as any)
+        .mockReturnValueOnce(mockChain([{ avg: null }]) as any)
+        .mockReturnValueOnce(mockChain([{ sum: null }]) as any)
+        .mockReturnValueOnce(mockChain([{ sum: null }]) as any)
+        .mockReturnValueOnce(mockChain([{ count: 0 }]) as any)
+        .mockReturnValueOnce(mockChain([{ count: 0 }]) as any);
 
       const req = createReq();
       const res = createRes();
@@ -193,6 +213,7 @@ describe('analytics handlers', () => {
       expect(data.totalMcqRecords).toBe(0);
       expect(data.averageConfidence).toBe(0);
       expect(data.totalCostUsd).toBe(0);
+      expect(data.rejectionRate).toBe(0);
     });
   });
 });

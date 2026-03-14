@@ -17,6 +17,12 @@ export async function listQueue(req: Request, res: Response, next: NextFunction)
   try {
     const { page, limit } = parsePagination(req.query);
     const offset = (page - 1) * limit;
+    const { status } = req.query as { status?: string };
+
+    const filters = [eq(reviewItems.workspaceId, req.workspaceId)];
+    if (status) {
+      filters.push(eq(reviewItems.status, status));
+    }
 
     const items = await db
       .select({
@@ -30,10 +36,7 @@ export async function listQueue(req: Request, res: Response, next: NextFunction)
         createdAt: reviewItems.createdAt,
       })
       .from(reviewItems)
-      .where(and(
-        eq(reviewItems.workspaceId, req.workspaceId),
-        sql`${reviewItems.status} IN ('pending', 'in_review')`,
-      ))
+      .where(and(...filters))
       .orderBy(desc(reviewItems.createdAt))
       .limit(limit)
       .offset(offset);
@@ -41,10 +44,7 @@ export async function listQueue(req: Request, res: Response, next: NextFunction)
     const [{ total }] = await db
       .select({ total: count() })
       .from(reviewItems)
-      .where(and(
-        eq(reviewItems.workspaceId, req.workspaceId),
-        sql`${reviewItems.status} IN ('pending', 'in_review')`,
-      ));
+      .where(and(...filters));
 
     // Enrich with MCQ data
     const enriched = await Promise.all(

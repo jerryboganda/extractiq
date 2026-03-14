@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from "@/components/ui/dialog";
-import { FolderKanban, Plus, Search, MoreVertical, Users } from "lucide-react";
+import { FolderKanban, Plus, Search, MoreVertical } from "lucide-react";
 import { useProjects, useCreateProject } from "@/hooks/use-api";
 import { toast } from "sonner";
 import { StaggerContainer, StaggerItem } from "@/components/StaggerContainer";
@@ -131,18 +131,9 @@ export default function Projects() {
                     </div>
                     <Badge className={`text-[10px] px-1.5 py-0 ${statusColors[project.status]}`}>{project.status}</Badge>
                   </div>
-                  <div className="mt-3">
-                    <div className="flex items-center justify-between text-[11px] mb-1">
-                      <span className="text-muted-foreground">Progress</span>
-                      <span className="font-medium">{project.progress}%</span>
-                    </div>
-                    <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-                      <div className="h-full rounded-full bg-primary transition-all duration-1000" style={{ width: `${project.progress}%` }} />
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1 mt-3">
-                    <Users className="h-3 w-3 text-muted-foreground" />
-                    <span className="text-[11px] text-muted-foreground">{project.members} members</span>
+                  <div className="mt-3 pt-3 border-t border-border/50 flex items-center justify-between text-[11px]">
+                    <span className="text-muted-foreground">Created</span>
+                    <span className="font-medium">{project.lastActivity}</span>
                   </div>
                 </CardContent>
               </Card>

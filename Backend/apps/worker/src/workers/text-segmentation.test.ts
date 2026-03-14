@@ -17,6 +17,16 @@ vi.mock('@mcq-platform/logger', () => ({
   createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
 }));
 
+vi.mock('../lib/job-guard.js', () => ({
+  isJobCancelled: vi.fn().mockResolvedValue(false),
+  updateJobStage: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('../lib/failure-state.js', () => ({
+  markProcessingFailure: vi.fn().mockResolvedValue(undefined),
+  shouldPersistFailure: vi.fn().mockReturnValue(true),
+}));
+
 import { processTextSegmentation } from './text-segmentation.js';
 import { db } from '@mcq-platform/db';
 import { enqueue } from '@mcq-platform/queue';
@@ -118,7 +128,7 @@ describe('text-segmentation worker', () => {
     expect(mockedEnqueue).toHaveBeenCalled();
   });
 
-  it('does not enqueue MCQ extraction when no LLM provider found', async () => {
+  it('throws when no LLM provider is configured', async () => {
     const text = '1. What is DNA?\nA) Protein\nB) Nucleic acid';
     const artifact = { id: 'ocr-1', markdownText: text, rawText: text };
     const page = { documentId: 'doc-1' };
@@ -129,13 +139,12 @@ describe('text-segmentation worker', () => {
       .mockReturnValueOnce(mockChain([]) as any); // no provider
     mockedDb.insert.mockReturnValue(mockChain([{ id: 'seg-1' }]) as any);
 
-    await processTextSegmentation(createJob({
+    await expect(processTextSegmentation(createJob({
       jobId: 'j1', documentPageId: 'dp1', workspaceId: 'ws-1', ocrArtifactId: 'ocr-1',
-    }));
+    }))).rejects.toThrow('No enabled LLM provider configured for workspace ws-1');
 
     // Segments should be inserted
     expect(mockedDb.insert).toHaveBeenCalled();
-    // But no enqueue since no provider
     expect(mockedEnqueue).not.toHaveBeenCalled();
   });
 });

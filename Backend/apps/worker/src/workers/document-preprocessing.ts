@@ -1,11 +1,13 @@
+import { isJobCancelled, updateJobStage } from '../lib/job-guard.js';
 import type { Job } from 'bullmq';
 import type { DocumentPreprocessingPayload } from '@mcq-platform/queue';
 import { enqueue, QUEUE_NAMES, type PageClassificationPayload } from '@mcq-platform/queue';
-import { db, documents, documentPages, pageImages } from '@mcq-platform/db';
+import { db, documents, documentPages, pageImages, jobTasks } from '@mcq-platform/db';
 import { download } from '@mcq-platform/storage';
 import { upload, buildPageImageKey } from '@mcq-platform/storage';
 import { createLogger } from '@mcq-platform/logger';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
+import { markProcessingFailure, shouldPersistFailure } from '../lib/failure-state.js';
 
 const logger = createLogger('worker:document-preprocessing');
 
@@ -23,6 +25,11 @@ const logger = createLogger('worker:document-preprocessing');
 export async function processDocumentPreprocessing(job: Job<DocumentPreprocessingPayload>) {
   const { jobId, documentId, workspaceId, s3Key } = job.data;
   logger.info({ jobId, documentId }, 'Starting document preprocessing');
+
+  // C2: Skip if parent job was cancelled
+  if (await isJobCancelled(jobId)) return;
+  // H2: Update job to preprocessing stage
+  await updateJobStage(jobId, 'preprocessing');
 
   try {
     // Download document
@@ -99,10 +106,32 @@ export async function processDocumentPreprocessing(job: Job<DocumentPreprocessin
       status: 'processing',
     }).where(eq(documents.id, documentId));
 
+    await db.update(jobTasks).set({
+      status: 'completed',
+      outputData: { pageCount },
+      completedAt: new Date(),
+    }).where(and(
+      eq(jobTasks.jobId, jobId),
+      eq(jobTasks.documentId, documentId),
+      eq(jobTasks.taskType, 'preprocessing'),
+    ));
+
     logger.info({ jobId, documentId, pageCount }, 'Document preprocessing complete');
   } catch (err) {
     logger.error({ jobId, documentId, err }, 'Document preprocessing failed');
     await db.update(documents).set({ status: 'failed' }).where(eq(documents.id, documentId));
+    await db.update(jobTasks).set({
+      status: 'failed',
+      errorMessage: err instanceof Error ? err.message : 'Document preprocessing failed',
+      completedAt: new Date(),
+    }).where(and(
+      eq(jobTasks.jobId, jobId),
+      eq(jobTasks.documentId, documentId),
+      eq(jobTasks.taskType, 'preprocessing'),
+    ));
+    if (shouldPersistFailure(job)) {
+      await markProcessingFailure({ jobId, documentId, taskType: 'preprocessing', error: err });
+    }
     throw err;
   }
 }

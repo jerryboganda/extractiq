@@ -4,6 +4,7 @@ import { enqueue, QUEUE_NAMES } from '@mcq-platform/queue';
 import { db, mcqRecords, reviewItems, jobs, jobTasks } from '@mcq-platform/db';
 import { createLogger } from '@mcq-platform/logger';
 import { eq, sql } from 'drizzle-orm';
+import { markProcessingFailure, shouldPersistFailure } from '../lib/failure-state.js';
 
 const logger = createLogger('worker:review-routing');
 
@@ -21,19 +22,21 @@ export async function processReviewRouting(job: Job<ReviewRoutingPayload>) {
   const { jobId, mcqRecordId, workspaceId } = job.data;
   logger.info({ jobId, mcqRecordId }, 'Starting review routing');
 
-  const [record] = await db
-    .select()
-    .from(mcqRecords)
-    .where(eq(mcqRecords.id, mcqRecordId))
-    .limit(1);
+  try {
 
-  if (!record) {
-    throw new Error(`MCQ record ${mcqRecordId} not found`);
-  }
+    const [record] = await db
+      .select()
+      .from(mcqRecords)
+      .where(eq(mcqRecords.id, mcqRecordId))
+      .limit(1);
 
-  const confidence = record.confidence ?? 0;
-  const flags = (record.flags ?? []) as string[];
-  const hallucinationRisk = record.hallucinationRiskTier ?? 'low';
+    if (!record) {
+      throw new Error(`MCQ record ${mcqRecordId} not found`);
+    }
+
+    const confidence = record.confidence ?? 0;
+    const flags = (record.flags ?? []) as string[];
+    const hallucinationRisk = record.hallucinationRiskTier ?? 'low';
 
   // Auto-approve threshold (configurable per workspace in the future)
   const autoApproveThreshold = 0.9;
@@ -77,10 +80,16 @@ export async function processReviewRouting(job: Job<ReviewRoutingPayload>) {
   // Update parent job progress
   await updateJobProgress(jobId);
 
-  logger.info(
-    { jobId, mcqRecordId, reviewStatus, confidence, flags },
-    'Review routing complete',
-  );
+    logger.info(
+      { jobId, mcqRecordId, reviewStatus, confidence, flags },
+      'Review routing complete',
+    );
+  } catch (err) {
+    if (shouldPersistFailure(job)) {
+      await markProcessingFailure({ jobId, mcqRecordId, taskType: 'review_routing', error: err });
+    }
+    throw err;
+  }
 }
 
 // ──────────────────────────────────────────────

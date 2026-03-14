@@ -10,6 +10,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-mcq_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-mcq_platform}
+      POSTGRES_MAX_CONNECTIONS: ${POSTGRES_MAX_CONNECTIONS:-100}
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./Backend/scripts/init-db.sql:/docker-entrypoint-initdb.d/init.sql
@@ -18,6 +19,14 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
     networks:
       - extractiq
 
@@ -25,7 +34,7 @@ services:
     image: redis:7-alpine
     container_name: extractiq-redis
     restart: unless-stopped
-    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --requirepass ${REDIS_PASSWORD}
+    command: redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru --requirepass ${REDIS_PASSWORD} --timeout 0 --tcp-keepalive 60
     volumes:
       - redisdata:/data
     healthcheck:
@@ -33,6 +42,14 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
     networks:
       - extractiq
 
@@ -51,6 +68,14 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
     networks:
       - extractiq
 
@@ -71,6 +96,26 @@ services:
       - extractiq
 
   # ── Application ──
+  migrate:
+    build:
+      context: ./Backend
+      dockerfile: Dockerfile
+      target: api
+    restart: "no"
+    env_file: ./Backend/.env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-mcq_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-mcq_platform}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      S3_ENDPOINT: http://minio:9000
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-}
+    command: ["node", "scripts/run-migrations.js", "migrate", "--run"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - extractiq
+
   api:
     build:
       context: ./Backend
@@ -89,7 +134,7 @@ services:
       S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-}
       APP_BASE_URL: ${APP_BASE_URL}
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:4000/api/v1/health"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:4000/api/v1/health/ready"]
       interval: 15s
       timeout: 5s
       start_period: 20s
@@ -100,6 +145,8 @@ services:
           memory: 512M
           cpus: '1.0'
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
@@ -114,7 +161,6 @@ services:
       context: ./Backend
       dockerfile: Dockerfile
       target: worker
-    container_name: extractiq-worker
     restart: unless-stopped
     env_file: ./Backend/.env
     environment:
@@ -123,18 +169,34 @@ services:
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
       S3_ENDPOINT: http://minio:9000
       S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-}
+      WORKER_SHUTDOWN_TIMEOUT_MS: ${WORKER_SHUTDOWN_TIMEOUT_MS:-30000}
     healthcheck:
-      test: ["CMD", "node", "-e", "process.exit(0)"]
+      test: ["CMD", "node", "--import", "tsx", "scripts/check-worker-health.ts"]
       interval: 30s
       timeout: 5s
       start_period: 15s
       retries: 3
     deploy:
+      # Note: replicas is honored by swarm-compatible orchestrators.
+      # For plain docker compose, scale with: docker compose up --scale worker=${WORKER_REPLICAS:-2}
+      replicas: ${WORKER_REPLICAS:-2}
       resources:
         limits:
           memory: 1G
           cpus: '2.0'
+        reservations:
+          memory: 512M
+          cpus: '1.0'
+      update_config:
+        parallelism: 1
+        delay: 10s
+        failure_action: rollback
+      rollback_config:
+        parallelism: 1
+        delay: 10s
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:

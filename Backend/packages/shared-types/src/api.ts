@@ -30,7 +30,6 @@ export interface ApiResponse<T> {
 
 // ──────────────────────────────────────────────
 // Frontend-compatible response shapes
-// (These match the mock data in the Web App)
 // ──────────────────────────────────────────────
 
 /** Dashboard stats — matches mockStats */
@@ -405,7 +404,7 @@ export const updateProviderSchema = z.object({
 });
 
 export const createExportSchema = z.object({
-  format: z.enum(['json', 'jsonl', 'csv', 'qti_2_1', 'scorm_2004', 'xapi']),
+  format: z.enum(['json', 'csv', 'qti_2_1', 'gift', 'aiken']),
   projectId: z.string().uuid(),
   dateFrom: z.string().optional(),
   dateTo: z.string().optional(),

@@ -73,6 +73,11 @@ interface RawAnalyticsSummary {
   totalMcqRecords?: number;
   averageConfidence?: number;
   totalCostUsd?: number;
+  rejectionRate?: number;
+  extractionsChange?: string;
+  confidenceChange?: string;
+  costChange?: string;
+  rejectionChange?: string;
 }
 
 interface RawWorkspace {
@@ -137,7 +142,7 @@ function mapMcqRecord(record: RawMcqRecord): McqRecordItem {
     confidence: Math.round((record.confidence ?? 0) * 100),
     difficulty: (record.difficulty ?? "medium").replace(/^./, (value) => value.toUpperCase()),
     tags: Array.isArray(record.flags) ? record.flags : [],
-    document: "",
+    document: r.documentId ?? "",
     page: record.sourcePage ?? 0,
     version: record.version,
   };
@@ -259,8 +264,6 @@ export function useProjects(params?: { page?: number; limit?: number; search?: s
       items: response.data.items.map((project) => ({
         ...project,
         lastActivity: project.createdAt ? new Date(project.createdAt).toLocaleDateString() : "Recently updated",
-        progress: 100,
-        members: 1,
       })),
     }),
   });
@@ -543,7 +546,10 @@ export function useBulkReview() {
 // Analytics
 export function useAnalyticsTimeSeries(params?: { days?: number }) {
   const query = new URLSearchParams();
-  if (params?.days) query.set("days", String(params.days));
+  if (params?.days) {
+    const range = params.days === 7 ? "7d" : params.days === 90 ? "90d" : "30d";
+    query.set("range", range);
+  }
 
   return useQuery({
     queryKey: ["analytics", "time-series", params ?? {}],
@@ -592,11 +598,11 @@ export function useAnalyticsSummary() {
       totalExtractions: response.data.totalMcqRecords ?? 0,
       avgConfidence: response.data.averageConfidence ?? 0,
       totalCost: response.data.totalCostUsd ?? 0,
-      rejectionRate: 0,
-      extractionsChange: "+0%",
-      confidenceChange: "+0%",
-      costChange: "+0%",
-      rejectionChange: "+0%",
+      rejectionRate: response.data.rejectionRate ?? 0,
+      extractionsChange: response.data.extractionsChange ?? "0%",
+      confidenceChange: response.data.confidenceChange ?? "0%",
+      costChange: response.data.costChange ?? "0%",
+      rejectionChange: response.data.rejectionChange ?? "0%",
     }),
   });
 }

@@ -1,9 +1,11 @@
+import { isJobCancelled } from '../lib/job-guard.js';
 import type { Job } from 'bullmq';
 import type { PageClassificationPayload, OcrExtractionPayload, VlmExtractionPayload } from '@mcq-platform/queue';
 import { enqueue, QUEUE_NAMES } from '@mcq-platform/queue';
 import { db, documentPages, pageImages, providerConfigs } from '@mcq-platform/db';
 import { createLogger } from '@mcq-platform/logger';
 import { eq, and } from 'drizzle-orm';
+import { markProcessingFailure, shouldPersistFailure } from '../lib/failure-state.js';
 
 const logger = createLogger('worker:page-classification');
 
@@ -19,29 +21,32 @@ export async function processPageClassification(job: Job<PageClassificationPaylo
   const { jobId, documentPageId, workspaceId } = job.data;
   logger.info({ jobId, documentPageId }, 'Classifying page');
 
-  const [page] = await db
-    .select()
-    .from(documentPages)
-    .where(eq(documentPages.id, documentPageId))
-    .limit(1);
+  try {
+    // C2: Skip if parent job was cancelled
+    if (await isJobCancelled(jobId)) return;
 
-  if (!page) {
-    logger.error({ documentPageId }, 'Page not found');
-    return;
-  }
+    const [page] = await db
+      .select()
+      .from(documentPages)
+      .where(eq(documentPages.id, documentPageId))
+      .limit(1);
 
-  // Determine routing based on text layer presence
-  const hasText = page.textLayerPresent === 'true';
-  const routingDecision = hasText ? 'ocr_llm' : 'vlm_direct';
+    if (!page) {
+      throw new Error(`Document page ${documentPageId} not found`);
+    }
 
-  // Update classification
-  await db.update(documentPages).set({
-    routingDecision,
-    classification: 'question', // Default; could be enhanced with ML
-  }).where(eq(documentPages.id, documentPageId));
+    // Determine routing based on text layer presence
+    const hasText = page.textLayerPresent === 'true';
+    const routingDecision = hasText ? 'ocr_llm' : 'vlm_direct';
 
-  // Get workspace provider for the appropriate category
-  if (routingDecision === 'ocr_llm') {
+    // Update classification
+    await db.update(documentPages).set({
+      routingDecision,
+      classification: 'question', // Default; could be enhanced with ML
+    }).where(eq(documentPages.id, documentPageId));
+
+    // Get workspace provider for the appropriate category
+    if (routingDecision === 'ocr_llm') {
     // Find OCR provider
     const [ocrProvider] = await db
       .select()
@@ -60,8 +65,10 @@ export async function processPageClassification(job: Job<PageClassificationPaylo
         workspaceId,
         providerConfigId: ocrProvider.id,
       });
+    } else {
+      throw new Error(`No enabled OCR provider configured for workspace ${workspaceId}`);
     }
-  } else {
+    } else {
     // VLM direct — need page image
     const [image] = await db
       .select()
@@ -87,8 +94,18 @@ export async function processPageClassification(job: Job<PageClassificationPaylo
         providerConfigId: vlmProvider.id,
         pageImageS3Key: image.s3Key,
       });
+    } else if (!image) {
+      throw new Error(`No page image found for page ${documentPageId}`);
+    } else {
+      throw new Error(`No enabled VLM provider configured for workspace ${workspaceId}`);
     }
-  }
+    }
 
-  logger.info({ jobId, documentPageId, routingDecision }, 'Page classified');
+    logger.info({ jobId, documentPageId, routingDecision }, 'Page classified');
+  } catch (err) {
+    if (shouldPersistFailure(job)) {
+      await markProcessingFailure({ jobId, documentPageId, taskType: 'page_classification', error: err });
+    }
+    throw err;
+  }
 }

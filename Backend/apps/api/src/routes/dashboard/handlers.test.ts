@@ -4,7 +4,7 @@ import type { NextFunction, Request, Response } from 'express';
 vi.mock('@mcq-platform/db', () => ({
   db: { select: vi.fn() },
   documents: { workspaceId: 'documents.workspaceId', id: 'documents.id', filename: 'documents.filename', createdAt: 'documents.createdAt' },
-  mcqRecords: { workspaceId: 'mcq.workspaceId', reviewStatus: 'mcq.reviewStatus', createdAt: 'mcq.createdAt' },
+  mcqRecords: { workspaceId: 'mcq.workspaceId', reviewStatus: 'mcq.reviewStatus', createdAt: 'mcq.createdAt', updatedAt: 'mcq.updatedAt', confidence: 'mcq.confidence' },
   jobs: { workspaceId: 'jobs.workspaceId', status: 'jobs.status', id: 'jobs.id', createdAt: 'jobs.createdAt' },
   providerConfigs: { workspaceId: 'provider.workspaceId', isEnabled: 'provider.isEnabled', id: 'provider.id' },
   providerBenchmarks: { providerConfigId: 'bench.providerConfigId', measuredAt: 'bench.measuredAt' },
@@ -58,6 +58,14 @@ describe('dashboard handlers', () => {
       .mockReturnValueOnce(mockChain([{ count: 100 }]) as never)
       .mockReturnValueOnce(mockChain([{ count: 500 }]) as never)
       .mockReturnValueOnce(mockChain([{ count: 400 }]) as never)
+      .mockReturnValueOnce(mockChain([{ count: 3 }]) as never)
+      .mockReturnValueOnce(mockChain([{ count: 10 }]) as never)
+      .mockReturnValueOnce(mockChain([{ count: 10 }]) as never)
+      .mockReturnValueOnce(mockChain([{ count: 50 }]) as never)
+      .mockReturnValueOnce(mockChain([{ count: 50 }]) as never)
+      .mockReturnValueOnce(mockChain([{ count: 40 }]) as never)
+      .mockReturnValueOnce(mockChain([{ count: 40 }]) as never)
+      .mockReturnValueOnce(mockChain([{ count: 3 }]) as never)
       .mockReturnValueOnce(mockChain([{ count: 3 }]) as never);
 
     const res = createRes();

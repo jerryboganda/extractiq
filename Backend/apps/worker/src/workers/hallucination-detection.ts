@@ -1,9 +1,11 @@
+import { isJobCancelled } from '../lib/job-guard.js';
 import type { Job } from 'bullmq';
 import type { HallucinationDetectionPayload, ReviewRoutingPayload } from '@mcq-platform/queue';
 import { enqueue, QUEUE_NAMES } from '@mcq-platform/queue';
 import { db, mcqRecords, hallucinationEvents } from '@mcq-platform/db';
 import { createLogger } from '@mcq-platform/logger';
 import { eq } from 'drizzle-orm';
+import { markProcessingFailure, shouldPersistFailure } from '../lib/failure-state.js';
 
 const logger = createLogger('worker:hallucination-detection');
 
@@ -20,6 +22,11 @@ const logger = createLogger('worker:hallucination-detection');
 export async function processHallucinationDetection(job: Job<HallucinationDetectionPayload>) {
   const { jobId, mcqRecordId, workspaceId, sourceText } = job.data;
   logger.info({ jobId, mcqRecordId }, 'Starting hallucination detection');
+
+  try {
+
+    // C2: Skip if parent job was cancelled
+    if (await isJobCancelled(jobId)) return;
 
   const [record] = await db
     .select()
@@ -68,10 +75,16 @@ export async function processHallucinationDetection(job: Job<HallucinationDetect
     workspaceId,
   });
 
-  logger.info(
-    { jobId, mcqRecordId, detectionCount: detections.length, maxSeverity },
-    'Hallucination detection complete',
-  );
+    logger.info(
+      { jobId, mcqRecordId, detectionCount: detections.length, maxSeverity },
+      'Hallucination detection complete',
+    );
+  } catch (err) {
+    if (shouldPersistFailure(job)) {
+      await markProcessingFailure({ jobId, mcqRecordId, taskType: 'hallucination_detection', error: err });
+    }
+    throw err;
+  }
 }
 
 // ──────────────────────────────────────────────

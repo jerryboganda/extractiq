@@ -36,5 +36,5 @@ FROM source AS worker
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 USER appuser
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD pgrep -f "apps/worker/src/index.ts" > /dev/null || exit 1
+  CMD node --import tsx scripts/check-worker-health.ts || exit 1
 CMD ["node", "--import", "tsx", "apps/worker/src/index.ts"]

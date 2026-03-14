@@ -2,7 +2,9 @@ import type { Request, Response, NextFunction } from 'express';
 import { eq, and, desc } from 'drizzle-orm';
 import { db, providerConfigs, providerBenchmarks } from '@mcq-platform/db';
 import { decryptProviderSecret, encryptProviderSecret } from '@mcq-platform/auth';
+import { env } from '@mcq-platform/config';
 import { AppError } from '../../middleware/error-handler.js';
+import { writeAuditLog } from '../../lib/audit.js';
 
 export async function list(req: Request, res: Response, next: NextFunction) {
   try {
@@ -70,6 +72,15 @@ export async function create(req: Request, res: Response, next: NextFunction) {
       })
       .returning();
 
+    writeAuditLog({
+      workspaceId: req.workspaceId,
+      userId: req.userId,
+      resourceType: 'provider',
+      resourceId: provider.id,
+      action: 'provider.created',
+      details: { displayName, category, providerType },
+    });
+
     res.status(201).json({
       data: {
         id: provider.id,
@@ -134,6 +145,18 @@ export async function update(req: Request, res: Response, next: NextFunction) {
 
     if (!provider) throw new AppError(404, 'NOT_FOUND', 'Provider not found');
 
+    writeAuditLog({
+      workspaceId: req.workspaceId,
+      userId: req.userId,
+      resourceType: 'provider',
+      resourceId: provider.id,
+      action: 'provider.updated',
+      details: Object.keys(updates).reduce<Record<string, unknown>>((acc, key) => {
+        if (key !== 'apiKeyEncrypted') acc[key] = updates[key];
+        return acc;
+      }, {}),
+    });
+
     res.json({ data: provider });
   } catch (err) {
     next(err);
@@ -149,6 +172,15 @@ export async function remove(req: Request, res: Response, next: NextFunction) {
       .returning();
 
     if (!provider) throw new AppError(404, 'NOT_FOUND', 'Provider not found');
+
+    writeAuditLog({
+      workspaceId: req.workspaceId,
+      userId: req.userId,
+      resourceType: 'provider',
+      resourceId: provider.id,
+      action: 'provider.deleted',
+      details: { displayName: provider.displayName, providerType: provider.providerType },
+    });
 
     res.json({ data: { message: 'Provider deleted' } });
   } catch (err) {
@@ -167,32 +199,119 @@ export async function test(req: Request, res: Response, next: NextFunction) {
 
     if (!provider) throw new AppError(404, 'NOT_FOUND', 'Provider not found');
 
-    // Decrypt API key and test connectivity
     const apiKey = decryptProviderSecret(provider.apiKeyEncrypted);
     const start = Date.now();
 
-    // Simple connectivity test — varies by provider
     let healthy = false;
+    let latency = 0;
+    let errorMessage = '';
+
     try {
-      // For now, just verify the key is decryptable and non-empty
-      healthy = apiKey.length > 0;
-    } catch {
-      healthy = false;
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+
+      switch (provider.providerType) {
+        case 'openai': {
+          const response = await fetch('https://api.openai.com/v1/models', {
+            headers: { Authorization: `Bearer ${apiKey}` },
+            signal: controller.signal,
+          });
+          healthy = response.ok;
+          if (!response.ok) errorMessage = `OpenAI API error: ${response.status}`;
+          break;
+        }
+        case 'anthropic': {
+          const response = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+              'x-api-key': apiKey,
+              'anthropic-version': '2023-06-01',
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              model: 'claude-sonnet-4-20250514',
+              max_tokens: 1,
+              messages: [{ role: 'user', content: 'ping' }],
+            }),
+            signal: controller.signal,
+          });
+          healthy = response.ok;
+          if (!response.ok) errorMessage = `Anthropic API error: ${response.status}`;
+          break;
+        }
+        case 'google': {
+          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`, {
+            signal: controller.signal,
+          });
+          healthy = response.ok;
+          if (!response.ok) errorMessage = `Google API error: ${response.status}`;
+          break;
+        }
+        case 'mistral': {
+          const response = await fetch('https://api.mistral.ai/v1/models', {
+            headers: { Authorization: `Bearer ${apiKey}` },
+            signal: controller.signal,
+          });
+          healthy = response.ok;
+          if (!response.ok) errorMessage = `Mistral API error: ${response.status}`;
+          break;
+        }
+        case 'qwen_vl': {
+          if (!env.QWEN_VL_ENDPOINT || !env.QWEN_VL_API_KEY) {
+            errorMessage = 'Qwen VL endpoint or API key not configured';
+            break;
+          }
+          const response = await fetch(`${env.QWEN_VL_ENDPOINT}/health`, {
+            signal: controller.signal,
+          });
+          healthy = response.ok;
+          if (!response.ok) errorMessage = `Qwen VL API error: ${response.status}`;
+          break;
+        }
+        case 'glm_ocr': {
+          if (!env.GLM_OCR_ENDPOINT) {
+            errorMessage = 'GLM OCR endpoint not configured';
+            break;
+          }
+          const response = await fetch(`${env.GLM_OCR_ENDPOINT}/health`, {
+            signal: controller.signal,
+          });
+          healthy = response.ok;
+          if (!response.ok) errorMessage = `GLM OCR API error: ${response.status}`;
+          break;
+        }
+        default:
+          errorMessage = `Unsupported provider type: ${provider.providerType}`;
+      }
+
+      latency = Date.now() - start;
+      clearTimeout(timeout);
+    } catch (err) {
+      latency = Date.now() - start;
+      errorMessage = err instanceof Error ? err.message : 'Provider connectivity test failed';
     }
 
-    const latency = Date.now() - start;
-    const newStatus = healthy ? 'healthy' : 'offline';
+    const newStatus = healthy ? (latency > 5000 ? 'degraded' : 'healthy') : 'offline';
 
     await db
       .update(providerConfigs)
       .set({ healthStatus: newStatus, lastHealthCheck: new Date() })
       .where(eq(providerConfigs.id, provider.id));
 
+    writeAuditLog({
+      workspaceId: req.workspaceId,
+      userId: req.userId,
+      resourceType: 'provider',
+      resourceId: provider.id,
+      action: 'provider.tested',
+      details: { status: newStatus, latencyMs: latency },
+    });
+
     res.json({
       data: {
         status: newStatus,
         latencyMs: latency,
-        message: healthy ? 'Provider is reachable' : 'Provider test failed',
+        message: healthy ? 'Provider is reachable' : errorMessage || 'Provider test failed',
       },
     });
   } catch (err) {

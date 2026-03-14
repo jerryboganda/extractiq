@@ -2,10 +2,15 @@ import type { Request, Response, NextFunction } from 'express';
 import { eq, count, desc } from 'drizzle-orm';
 import { db, auditLogs, users } from '@mcq-platform/db';
 
+function parsePag(query: Record<string, unknown>) {
+  const page = Math.max(1, Math.floor(Number(query.page) || 1));
+  const limit = Math.min(100, Math.max(1, Math.floor(Number(query.limit) || 20)));
+  return { page, limit, offset: (page - 1) * limit };
+}
+
 export async function list(req: Request, res: Response, next: NextFunction) {
   try {
-    const { page, limit } = req.query as unknown as { page: number; limit: number };
-    const offset = (page - 1) * limit;
+    const { page, limit, offset } = parsePag(req.query as Record<string, unknown>);
 
     const items = await db
       .select()

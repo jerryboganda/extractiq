@@ -10,11 +10,14 @@ vi.mock('@mcq-platform/db', () => ({
   },
   documents: { id: 'documents.id', workspaceId: 'documents.workspaceId', projectId: 'documents.projectId', s3Key: 'documents.s3Key' },
   projects: { id: 'projects.id', workspaceId: 'projects.workspaceId', name: 'projects.name' },
+  segments: { documentId: 'segments.documentId' },
 }));
 
 vi.mock('@mcq-platform/storage', () => ({
   getPresignedUploadUrl: vi.fn(),
   buildDocumentKey: vi.fn(),
+  deleteObject: vi.fn(),
+  listObjects: vi.fn(),
 }));
 
 vi.mock('uuid', () => ({
@@ -23,11 +26,13 @@ vi.mock('uuid', () => ({
 
 import { completeUpload, getById, list, presignUpload, remove } from './handlers.js';
 import { db } from '@mcq-platform/db';
-import { buildDocumentKey, getPresignedUploadUrl } from '@mcq-platform/storage';
+import { buildDocumentKey, deleteObject, getPresignedUploadUrl, listObjects } from '@mcq-platform/storage';
 
 const mockedDb = vi.mocked(db);
 const mockedBuildDocumentKey = vi.mocked(buildDocumentKey);
 const mockedGetPresignedUploadUrl = vi.mocked(getPresignedUploadUrl);
+const mockedDeleteObject = vi.mocked(deleteObject);
+const mockedListObjects = vi.mocked(listObjects);
 
 function createReq(overrides: Partial<Request> = {}): Request {
   return {
@@ -176,7 +181,12 @@ describe('documents handlers', () => {
   });
 
   it('deletes a document in the current workspace', async () => {
-    mockedDb.delete.mockReturnValueOnce(mockChain([{ id: 'doc-1' }]) as never);
+    mockedDb.select.mockReturnValueOnce(mockChain([{ id: 'doc-1', s3Key: 'ws-1/doc-1.pdf', filename: 'biology.pdf' }]) as never);
+    mockedDb.delete
+      .mockReturnValueOnce({ where: vi.fn().mockResolvedValue(undefined) } as never)
+      .mockReturnValueOnce({ where: vi.fn().mockResolvedValue(undefined) } as never);
+    mockedDeleteObject.mockResolvedValue(undefined as never);
+    mockedListObjects.mockResolvedValue([] as never);
 
     const res = createRes();
     await remove(createReq({ params: { id: 'doc-1' } as any }), res, next);

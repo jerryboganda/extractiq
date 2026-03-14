@@ -1,17 +1,28 @@
 import type { Request, Response, NextFunction } from 'express';
-import { eq, and, count, desc } from 'drizzle-orm';
+import { eq, and, count, desc, gte, lt } from 'drizzle-orm';
 import { db, mcqRecords, mcqRecordHistory } from '@mcq-platform/db';
 import { AppError } from '../../middleware/error-handler.js';
+import { parsePagination } from '../../lib/pagination.js';
 
 export async function list(req: Request, res: Response, next: NextFunction) {
   try {
-    const { page, limit } = req.query as unknown as { page: number; limit: number };
-    const offset = (page - 1) * limit;
+    const { page, limit, offset } = parsePagination(req.query as Record<string, unknown>);
+    const { status, confidence, projectId } = req.query as { status?: string; confidence?: string; projectId?: string };
+
+    const filters = [eq(mcqRecords.workspaceId, req.workspaceId)];
+    if (status) filters.push(eq(mcqRecords.reviewStatus, status));
+    if (projectId) filters.push(eq(mcqRecords.projectId, projectId));
+    if (confidence === 'high') filters.push(gte(mcqRecords.confidence, 0.9));
+    if (confidence === 'medium') {
+      filters.push(gte(mcqRecords.confidence, 0.7));
+      filters.push(lt(mcqRecords.confidence, 0.9));
+    }
+    if (confidence === 'low') filters.push(lt(mcqRecords.confidence, 0.7));
 
     const items = await db
       .select()
       .from(mcqRecords)
-      .where(eq(mcqRecords.workspaceId, req.workspaceId))
+      .where(and(...filters))
       .orderBy(desc(mcqRecords.createdAt))
       .limit(limit)
       .offset(offset);
@@ -19,7 +30,7 @@ export async function list(req: Request, res: Response, next: NextFunction) {
     const [{ total }] = await db
       .select({ total: count() })
       .from(mcqRecords)
-      .where(eq(mcqRecords.workspaceId, req.workspaceId));
+      .where(and(...filters));
 
     res.json({
       data: {

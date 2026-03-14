@@ -1,9 +1,10 @@
 import type { Request, Response, NextFunction } from 'express';
 import { eq, and, count, desc } from 'drizzle-orm';
-import { db, exportJobs, exportArtifacts } from '@mcq-platform/db';
+import { db, exportJobs, exportArtifacts, projects } from '@mcq-platform/db';
 import { getPresignedDownloadUrl } from '@mcq-platform/storage';
 import { enqueue, QUEUE_NAMES, type ExportGenerationPayload } from '@mcq-platform/queue';
 import { AppError } from '../../middleware/error-handler.js';
+import { writeAuditLog } from '../../lib/audit.js';
 
 function parsePagination(query: Request['query']) {
   const page = Number.parseInt(String(query.page ?? '1'), 10);
@@ -45,7 +46,18 @@ export async function create(req: Request, res: Response, next: NextFunction) {
   try {
     const { format, projectId, dateFrom, dateTo, minConfidence, status } = req.body;
 
-    const scope = { dateFrom, dateTo, minConfidence, status };
+    const [project] = await db
+      .select({ id: projects.id })
+      .from(projects)
+      .where(and(eq(projects.id, projectId), eq(projects.workspaceId, req.workspaceId)))
+      .limit(1);
+
+    if (!project) {
+      throw new AppError(404, 'PROJECT_NOT_FOUND', 'Project not found');
+    }
+
+    const reviewStatus = status === 'all_clean' ? 'approved' : status;
+    const scope = { dateFrom, dateTo, minConfidence, reviewStatus };
 
     const [exportJob] = await db
       .insert(exportJobs)
@@ -66,6 +78,15 @@ export async function create(req: Request, res: Response, next: NextFunction) {
       projectId,
       format,
       scope,
+    });
+
+    writeAuditLog({
+      workspaceId: req.workspaceId,
+      userId: req.userId,
+      resourceType: 'export',
+      resourceId: exportJob.id,
+      action: 'export.created',
+      details: { format, projectId, scope },
     });
 
     res.status(201).json({ data: exportJob });
